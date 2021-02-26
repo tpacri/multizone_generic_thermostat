@@ -1,7 +1,9 @@
 {
   "domain": "multizone_generic_thermostat",
   "name": "Multizone Generic Thermostat",
-  "documentation": "https://www.home-assistant.io/integrations/generic_thermostat",
-  "dependencies": ["sensor", "switch"],
-  "codeowners": [Tipa Cristian]
+  "documentation": "https://github.com/tpacri/multizone_generic_thermostat/blob/main/README.md",
+  "issue_tracker": "https://github.com/tpacri/multizone_generic_thermostat/issues",
+  "dependencies": [ "sensor", "switch" ],
+  "codeowners": [ "@tpacri" ],
+  "version": "1.0"
 }

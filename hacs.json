@@ -1,0 +1,9 @@
+{
+  "name": "multizone_generic_thermostat",
+  "domains": [
+    "climate",
+    "switch"
+  ],
+  "iot_class": "Local Polling",
+  "homeassistant": "2021.2.3"
+}
