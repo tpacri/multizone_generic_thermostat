@@ -1,0 +1,51 @@
+climate:
+  - platform: multizone_generic_thermostat
+    name: Thermostat
+    heater: switch.heating 
+    presets:
+        none:
+            report_zone_name_instead_preset_name: true
+            zones:
+                ambiental:
+                    target_sensor: sensor.thermostat_ambiental_temperature
+                    target_temp_sensor: input_number.min_ambiental_temperature
+                ambiental2:
+                    target_sensor: sensor.thermostat_ambiental_temperature2
+                    target_temp_sensor: input_number.min_ambiental_temperature
+                dining:
+                    target_sensor: sensor.dining_room_temperature
+                    target_temp_sensor: input_number.min_dining_temperature
+                kitchen:
+                    target_sensor: sensor.kitchen_temperature
+                    target_temp_sensor: input_number.min_kitchen_temperature
+                kids_bedroom:
+                    friendly_name: kids bedroom
+                    target_sensor: sensor.kids_bedroom_temperature
+                    target_temp_sensor: input_number.min_kids_bedroom_temperature
+                small_bedroom:
+                    friendly_name: small bedroom
+                    target_sensor: sensor.small_bedroom_temperature
+                    target_temp_sensor: input_number.min_small_bedroom_temperature
+                gaming_room:
+                    friendly_name: gaming room
+                    target_sensor: sensor.gaming_room_temperature
+                    target_temp_sensor: input_number.min_gaming_room_temperature
+                test:
+                    target_sensor: input_number.test_temperature
+                    target_temp_sensor: input_number.min_test_temperature
+                test2:
+                    target_sensor: input_number.test_temperature2
+                    target_temp_sensor: input_number.min_test_temperature2
+    min_temp: 17
+    max_temp: 25
+    ac_mode: false
+    #target_temp: 22.5
+    cold_tolerance: 0.5
+    hot_tolerance: 0.5
+    min_cycle_duration:
+      seconds: 10
+    keep_alive:
+      minutes: 3
+    initial_hvac_mode: "heat"
+    away_temp: 22
+    precision: 0.1  

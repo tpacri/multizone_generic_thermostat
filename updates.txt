@@ -1,0 +1,10 @@
+1. Based on Generic thermostat
+	This componenet is compatibe with Generic Thermostat config.
+
+1. Added support for zones that can be bound to fixed temperature or to a sensor/input_number that can be used to adjust temperature in a specific zone.
+	If we set 3 zones and each one is boud to different temperature sensor and different input_number sensor then thermostat will trigger heating only when any of the 3 zones is too cold.
+
+2. Added support for presets
+	User can define presets, and in each preset can define a list of zones. Thermostat will use only the selected Preset for controlling heating/cooling. Presets can be changed manually
+	
+3. Added a hack	in presets to allow display on default termostat card the coldest zone based on the set limits (check pictures). Thic can be achieved only by setting report_zone_name_instead_preset_name: true in a preset. With this hack on, you will see the coldest zone name on the thermostat card like in the picture and know what zone triggered heating, or what zone is about to trigger heating
