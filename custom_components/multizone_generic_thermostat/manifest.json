@@ -3,7 +3,7 @@
   "name": "Multizone Generic Thermostat",
   "documentation": "https://github.com/tpacri/multizone_generic_thermostat/blob/main/README.md",
   "issue_tracker": "https://github.com/tpacri/multizone_generic_thermostat/issues",
-  "dependencies": [ "sensor", "switch" ],
+  "dependencies": [ "sensor", "switch", "binary_sensor" ],
   "codeowners": [ "@tpacri" ],
   "version": "1.0"
 }

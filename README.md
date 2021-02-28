@@ -33,6 +33,7 @@ File | Purpose
 
 How multizone works:
 Lets assume we have the zones in the picture below. You can see that each zone/room has different target temperatures set and in config you can see that threshold is set to 0.5 degrees C. In each zone I have a temperature sensor, and there is just one central heating switch. 
+- The open window detection will be calculated on each temperature update for a zone, and if the temperature difference in time interval exceds the one defined in config, then that specific zone is marked with the "is window open" flag, and he binary_sensor exposed by the thermostat is set to on. If a zone is marked with "is window open" and has the zone_react_delay config field set, then this zone will be ignored as a trigger for the heater/cooler for the period specified in the zone_react_delay. Be aware that delta_temp:2 delta_time:00:02:00  represents the same steep as delta_temp:10 delta_time:00:10:00 (whic is one degree per minute) but in second case the "is_window_open" detector will watch over a longer time window (10 minutes instead of 2) and this will cause the "is_window_open" flag to be set to off later than in the first case (Ex: in the first case (with 2C, 2 mins), if room temp is 22 and someone opens the window and temperature drops in 1 minute to 21 the the "is_window_open" flag is set to on, the temperature will keep dropping to 18 within next 5 minutes and then will stay there. In this case, after temperature dropped to 18, afte 2 more meanutes because there drastic temperature change anymore then the "is window open" will become off.)
 - The heat will be turned on when at least one of the zones will have its current temperature under the lower threshold limit, and heater will maintain that zone active until the temperature in that area is bigger than the upper threshold limit. In this time, the termostat doesn't care about the other zones, because it tries to heat up this zone which becomes the active-locked one. 
 - When the temperature in this zne passes the upper threshold limit:
 	- a) if there is no other zone that has its current temperature under the lower limit threshold, the heating will be turned off;
@@ -124,12 +125,20 @@ climate:
                     friendly_name: gaming room
                     target_sensor: sensor.gaming_room_temperature
                     target_temp_sensor: input_number.min_gaming_room_temperature
+                    open_window:
+                        delta_temp: 2
+                        delta_time: 100
+                        zone_react_delay: 00:10:00                    
                 test:
                     target_sensor: input_number.test_temperature
                     target_temp_sensor: input_number.min_test_temperature
                 test2:
                     target_sensor: input_number.test_temperature2
                     target_temp_sensor: input_number.min_test_temperature2
+    open_window:
+        delta_temp: 2
+        delta_time: 120
+        zone_react_delay: 00:10:00
     min_temp: 17
     max_temp: 25
     ac_mode: false
@@ -142,7 +151,7 @@ climate:
       minutes: 3
     initial_hvac_mode: "heat"
     away_temp: 22
-    precision: 0.1  
+    precision: 0.1     
 ```	
 <!---->
 
