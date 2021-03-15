@@ -153,6 +153,13 @@ PLATFORM_SCHEMA = vol.All(
     }
     ))
 
+
+def is_temp_valid(temp)->bool:
+    return temp is not None and temp not in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            )
+
 class TempWithTime():
     def __init__(self, temp, temp_timestamp):
         self._temp = temp
@@ -170,8 +177,8 @@ class OpenWindowDef():
         self._zone_react_timestamp = None
 
     def add_temp(self, temp):
-        if temp is not None:
-            self._temperature_history.append(TempWithTime(temp, datetime.now()))
+        if is_temp_valid(temp):
+            self._temperature_history.append(TempWithTime(float(temp), datetime.now()))
             time_limit = datetime.now()-self._timedelta
             while len(self._temperature_history) > 0 and self._temperature_history[0]._temp_timestamp < time_limit:
                 self._temperature_history.pop(0)
@@ -210,6 +217,13 @@ class ZoneDef():
         #if self._target_entity_id and (isinstance(self._target_entity_id, float) or isinstance(self._target_entity_id, int)):
         #    self._target_temp = float(self._target_entity_id);
         self._cur_temp = None
+
+    def is_cur_temp_valid(self):
+        return is_temp_valid(self._cur_temp)
+
+    def is_target_temp_valid(self):
+        return is_temp_valid(self._target_temp)
+
     def set_cur_temp(self, cur_temp):
         self._cur_temp = cur_temp
         if self._openWindow is not None:
@@ -433,23 +447,20 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             """Init on startup."""
             _LOGGER.info("_async_startup. ")
 
+            obj = type('', (), {})()
+
             for z in self._selected_preset._zones:
                 sensor_state = self.hass.states.get(z._sensor_entity_id)
-                if sensor_state and sensor_state.state not in (
-                    STATE_UNAVAILABLE,
-                    STATE_UNKNOWN,
-                ):
-                    self._async_update_temp(z, sensor_state)
-                    self.async_write_ha_state()
+                obj.state = sensor_state
+
+                #self._async_update_temp(z, obj)
+                self.async_write_ha_state()
 
                 if z._target_entity_id:
                     sensor_state = self.hass.states.get(z._target_entity_id)
-                    if sensor_state and sensor_state.state not in (
-                        STATE_UNAVAILABLE,
-                        STATE_UNKNOWN,
-                    ):
-                        self._async_update_target_temp(z, sensor_state)
-                        self.async_write_ha_state()
+                    obj.state = sensor_state
+                    #self._async_update_target_temp(z, obj)
+                    self.async_write_ha_state()
 
         if self.hass.state == CoreState.running:
             _async_startup()
@@ -545,7 +556,8 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def current_temperature(self):
         """Return the sensor temperature."""
-        return (self._ongoing_zone or self._selected_zone)._cur_temp
+        cur_temp = (self._ongoing_zone or self._selected_zone)._cur_temp
+        return float(cur_temp) if is_temp_valid(cur_temp) else None
 
     @property
     def hvac_mode(self):
@@ -569,7 +581,8 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
-        return (self._ongoing_zone or self._selected_zone)._target_temp
+        target_temp = (self._ongoing_zone or self._selected_zone)._target_temp
+        return float(target_temp) if is_temp_valid(target_temp) else None
 
     @property
     def hvac_modes(self):
@@ -641,7 +654,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Handle target temperature changes."""
         sender = event.data.get("entity_id")
         new_state = event.data.get("new_state")
-        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if new_state is None:
             return
         
         #_LOGGER.info("_async_target_changed. %s", new_state.state)
@@ -658,7 +671,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Handle temperature changes."""
         sender = event.data.get("entity_id")
         new_state = event.data.get("new_state")
-        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if new_state is None:
             return
         
         # _LOGGER.info("_async_sensor_changed. %s", new_state.state)
@@ -690,7 +703,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     def _async_update_target_temp(self, zone, state):
         """Update thermostat with latest state from target sensor."""
         try:
-            zone._target_temp = float(state.state)
+            zone._target_temp = state.state
             _LOGGER.info("zone target value updated. %s: - set %s<%s", zone._name, zone._target_temp, zone._cur_temp)
         except ValueError as ex:
             _LOGGER.error("Unable to update target temp %s from sensor: %s", z._name, ex)
@@ -699,8 +712,8 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     def _async_update_temp(self, zone, state):
         """Update thermostat with latest state from sensor."""
         try:
-            _LOGGER.info("zone sensor value updated. %s: - set %s<%s", zone._name, zone._target_temp, float(state.state))
-            zone.set_cur_temp(float(state.state))
+            _LOGGER.info("zone sensor value updated. %s: - set %s<%s", zone._name, zone._target_temp, state.state)
+            zone.set_cur_temp(state.state)
         except ValueError as ex:
             _LOGGER.error("Unable to update %s from sensor: %s", zone._name, ex)
 
@@ -709,7 +722,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             self._selected_zone = self._ongoing_zone
             return
 
-        sortedZones =list(sorted(filter(lambda z: (z._cur_temp is not None) and (z._target_temp is not None) and (z._openWindow is None or (z._openWindow._zone_react_timestamp is None or z._openWindow._zone_react_timestamp<=datetime.now())), self._selected_preset._zones), key=lambda z: z._cur_temp  - z._target_temp))
+        sortedZones =list(sorted(filter(lambda z: (z.is_cur_temp_valid()) and (z.is_target_temp_valid()) and (z._openWindow is None or (z._openWindow._zone_react_timestamp is None or z._openWindow._zone_react_timestamp<=datetime.now())), self._selected_preset._zones), key=lambda z: float(z._cur_temp)  - float(z._target_temp)))
         if len(sortedZones) > 0:
             selected_zone = sortedZones[0]
         else:
@@ -723,7 +736,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Check if we need to turn heating on or off."""
         async with self._temp_lock:
             self.select_worst_zone()
-            if not self._active and None not in (self._selected_zone._cur_temp, self._selected_zone._target_temp):
+            if not self._active and (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid()):
                 self._active = True
                 _LOGGER.info(
                     "Obtained current and target temperature. "
@@ -754,17 +767,20 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     if not long_enough:
                         return
 
-            isValidTemp = self._selected_zone._target_temp is not None and self._selected_zone._cur_temp is not None
+            isValidTemp = (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid())
 
-            too_cold = isValidTemp and (self._selected_zone._target_temp >= self._selected_zone._cur_temp + self._cold_tolerance)
-            too_hot = isValidTemp and (self._selected_zone._cur_temp >= self._selected_zone._target_temp + self._hot_tolerance)
+            target_temp_value = float(self._selected_zone._target_temp)
+            cur_temp_value = float(self._selected_zone._cur_temp)
+
+            too_cold = isValidTemp and (target_temp_value >= cur_temp_value + self._cold_tolerance)
+            too_hot = isValidTemp and (cur_temp_value >= target_temp_value + self._hot_tolerance)
             if self._is_device_active:
                 if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
-                    _LOGGER.info("Turning off heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, self._selected_zone._target_temp, self._selected_zone._cur_temp)
+                    _LOGGER.info("Turning off heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, target_temp_value, cur_temp_value)
                     self._ongoing_zone = None
                     self.select_worst_zone()
-                    new_too_cold = self._selected_zone._target_temp >= self._selected_zone._cur_temp + self._cold_tolerance
-                    new_too_hot = self._selected_zone._cur_temp >= self._selected_zone._target_temp + self._hot_tolerance
+                    new_too_cold = target_temp_value >= cur_temp_value + self._cold_tolerance
+                    new_too_hot = cur_temp_value >= target_temp_value + self._hot_tolerance
                     if (self.ac_mode and not new_too_hot) or (not self.ac_mode and not new_too_cold):
                         await self._async_heater_turn_off()
                     else:
@@ -780,7 +796,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     await self._async_heater_turn_on()
             else:
                 if (self.ac_mode and too_hot) or (not self.ac_mode and too_cold):
-                    _LOGGER.info("Turning on heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, self._selected_zone._target_temp, self._selected_zone._cur_temp)
+                    _LOGGER.info("Turning on heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, target_temp_value, cur_temp_value)
 
                     self._ongoing_zone = self._selected_zone
                     await self._async_heater_turn_on()
