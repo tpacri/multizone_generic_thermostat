@@ -158,6 +158,7 @@ def is_temp_valid(temp)->bool:
     return temp is not None and temp not in (
                 STATE_UNAVAILABLE,
                 STATE_UNKNOWN,
+                ''
             )
 
 class TempWithTime():
