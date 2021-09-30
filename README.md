@@ -137,7 +137,8 @@ climate:
                     target_temp_sensor: input_number.min_test_temperature2
     open_window:
         delta_temp: 2
-        delta_time: 120
+        min_delta_time: 60
+        delta_time: 180
         zone_react_delay: 00:10:00
     min_temp: 17
     max_temp: 25

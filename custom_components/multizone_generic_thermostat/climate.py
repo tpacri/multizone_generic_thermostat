@@ -84,6 +84,7 @@ ATTR_SELECTED_ZONE="selected_zone"
 ATTR_SELECTED_PRESET="selected_preset"
 CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME="report_zone_name_instead_preset_name"
 CONF_DELTA_TEMP="delta_temp"
+CONF_MIN_DELTA_TIME="min_delta_time"
 CONF_DELTA_TIME="delta_time"
 CONF_OPEN_WINDOW="open_window"
 CONF_ZONE_REACT_DELAY="zone_react_delay"
@@ -94,6 +95,7 @@ OPEN_WINDIW_SCHEMA = vol.Schema(
         {
             vol.Required(CONF_DELTA_TEMP): vol.Coerce(float),
             vol.Required(CONF_DELTA_TIME): cv.time_period,
+            vol.Optional(CONF_MIN_DELTA_TIME): cv.time_period,
             vol.Optional(CONF_ZONE_REACT_DELAY): cv.time_period,
         }
     )
@@ -158,6 +160,7 @@ def is_temp_valid(temp)->bool:
     return temp is not None and temp not in (
                 STATE_UNAVAILABLE,
                 STATE_UNKNOWN,
+                ''
             )
 
 class TempWithTime():
@@ -166,9 +169,10 @@ class TempWithTime():
         self._temp_timestamp = temp_timestamp
 
 class OpenWindowDef():
-    def __init__(self, delta, timediff, zoneReactDelay):
+    def __init__(self, delta, timediff, mintimediff, zoneReactDelay):
         self._delta = abs(delta)
         self._timedelta = timediff
+        self._mintimedelta = mintimediff
         self._zoneReactDelay = zoneReactDelay
         self._steep = delta/timediff.total_seconds()
         self._temperature_history = []
@@ -187,21 +191,21 @@ class OpenWindowDef():
                 self._is_open_window = is_open_window
                 self._is_open_window_timestamp =  datetime.now() if is_open_window else None
                 self._zone_react_timestamp = (self._is_open_window_timestamp + self._zoneReactDelay) if (self._is_open_window_timestamp is not None and self._zoneReactDelay is not None) else None
-                _LOGGER.info("Is window open changed to %s", is_open_window)
+                _LOGGER.debug("Is window open changed to %s", is_open_window)
 
     def calculate_is_openwindow(self)->bool:
         if len(self._temperature_history)<=1:
             return False
         temp_diff=abs(self._temperature_history[0]._temp - self._temperature_history[len(self._temperature_history)-1]._temp)
         time_diff=self._temperature_history[len(self._temperature_history)-1]._temp_timestamp - self._temperature_history[0]._temp_timestamp
-        #_LOGGER.info("calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
+        #_LOGGER.info("calculating calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
 
         result = True
-        if time_diff.total_seconds() == 0 or temp_diff/time_diff.total_seconds() <= self._steep:
+        if time_diff.total_seconds() == 0 or temp_diff/time_diff.total_seconds() <= self._steep or (self._mintimedelta is not None and time_diff.total_seconds()<self._mintimedelta.total_seconds()):
             result = False
 
         if result != self._is_open_window:
-            _LOGGER.info("calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
+            _LOGGER.debug("calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
 
         return result
         
@@ -251,9 +255,10 @@ def parse_openwindow(config):
         return None
     delta = config[CONF_DELTA_TEMP]
     deltaTime = config[CONF_DELTA_TIME]
+    minDeltaTime = config[CONF_MIN_DELTA_TIME] if CONF_MIN_DELTA_TIME in config else None
     zoneReactDelay = config[CONF_ZONE_REACT_DELAY] if CONF_ZONE_REACT_DELAY in config else None
     
-    return OpenWindowDef(delta, deltaTime, zoneReactDelay)
+    return OpenWindowDef(delta, deltaTime, minDeltaTime, zoneReactDelay)
 
 def parse_zones_dict(explicit_zones, default_openwindow):
     zones = []
@@ -320,7 +325,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for p in presets:
         _LOGGER.info("Preset: %s %s %s", p._name, p._friendly_name, p._report_zone_name_instead_preset_name)
         for z in p._zones:
-            _LOGGER.info("Zone: %s %s SensorId:%s Target:%s", z._name, z._friendly_name, z._sensor_entity_id, z._target_entity_id)
+            _LOGGER.debug("Zone: %s %s SensorId:%s Target:%s", z._name, z._friendly_name, z._sensor_entity_id, z._target_entity_id)
 
     thermostat = MultizoneGenericThermostat(
         hass,
@@ -624,7 +629,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Set new target temperature."""
 
         temperature = kwargs.get(ATTR_TEMPERATURE)
-        _LOGGER.info("async_set_temperature. %s", temperature)
+        _LOGGER.debug("async_set_temperature. %s", temperature)
 
         if temperature is None:
             return
@@ -662,7 +667,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         for p in self._presets:
             for z in p._zones:
                 if z._target_entity_id == sender:
-                    _LOGGER.info("zone target value updated. %s: %s<%s", z._name, z._target_temp, new_state.state)
+                    _LOGGER.debug("zone target value updated. %s: %s<%s", z._name, z._target_temp, new_state.state)
                     self._async_update_target_temp(z, new_state)
         await self._async_control_heating()
         self.async_write_ha_state()
@@ -679,7 +684,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         for p in self._presets:
             for z in p._zones:
                 if z._sensor_entity_id == sender:
-                    _LOGGER.info("zone sensor value updated. %s: %s<%s", z._name, z._target_temp, new_state.state)
+                    _LOGGER.debug("zone sensor value updated. %s: %s<%s", z._name, z._target_temp, new_state.state)
                     self._async_update_temp(z, new_state)
         self._isWindowOpenBinarySensor.set_is_window_open(self._selected_preset.is_open_window())
         await self._async_control_heating()
@@ -704,7 +709,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Update thermostat with latest state from target sensor."""
         try:
             zone._target_temp = state.state
-            _LOGGER.info("zone target value updated. %s: - set %s<%s", zone._name, zone._target_temp, zone._cur_temp)
+            _LOGGER.debug("zone target value updated. %s: - set %s<%s", zone._name, zone._target_temp, zone._cur_temp)
         except ValueError as ex:
             _LOGGER.error("Unable to update target temp %s from sensor: %s", z._name, ex)
 
@@ -712,7 +717,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     def _async_update_temp(self, zone, state):
         """Update thermostat with latest state from sensor."""
         try:
-            _LOGGER.info("zone sensor value updated. %s: - set %s<%s", zone._name, zone._target_temp, state.state)
+            _LOGGER.debug("zone sensor value updated. %s: - set %s<%s", zone._name, zone._target_temp, state.state)
             zone.set_cur_temp(state.state)
         except ValueError as ex:
             _LOGGER.error("Unable to update %s from sensor: %s", zone._name, ex)
@@ -738,7 +743,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             self.select_worst_zone()
             if not self._active and (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid()):
                 self._active = True
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Obtained current and target temperature. "
                     "Multizone generic thermostat active. %s < %s",
                     self._selected_zone._target_temp,
@@ -787,7 +792,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                         _LOGGER.info("Not turning off heater because there is another zone too cold")
                 elif time is not None:
                     # The time argument is passed only in keep-alive case
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "Keep-alive - Turning on heater heater %s",
                         self.heater_entity_id,
                     )
@@ -802,7 +807,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     await self._async_heater_turn_on()
                 elif time is not None:
                     # The time argument is passed only in keep-alive case
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "Keep-alive - Turning off heater %s", self.heater_entity_id
                     )
                     self._ongoing_zone = None
