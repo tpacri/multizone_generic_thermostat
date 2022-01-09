@@ -160,6 +160,7 @@ def is_temp_valid(temp)->bool:
     return temp is not None and temp not in (
                 STATE_UNAVAILABLE,
                 STATE_UNKNOWN,
+				'unavailable',
                 ''
             )
 
@@ -179,33 +180,38 @@ class OpenWindowDef():
         self._is_open_window = False
         self._is_open_window_timestamp = None
         self._zone_react_timestamp = None
+        self._zoneName = "not set yet"
 
     def add_temp(self, temp):
         if is_temp_valid(temp):
             self._temperature_history.append(TempWithTime(float(temp), datetime.now()))
-            time_limit = datetime.now()-self._timedelta
+            time_limit = datetime.now()-max(self._timedelta, self._mintimedelta if self._mintimedelta is not None else self._timedelta)
+
+            is_open_window = self.calculate_is_openwindow()
+
             while len(self._temperature_history) > 0 and self._temperature_history[0]._temp_timestamp < time_limit:
                 self._temperature_history.pop(0)
-            is_open_window = self.calculate_is_openwindow()
+
             if is_open_window != self._is_open_window:
                 self._is_open_window = is_open_window
                 self._is_open_window_timestamp =  datetime.now() if is_open_window else None
                 self._zone_react_timestamp = (self._is_open_window_timestamp + self._zoneReactDelay) if (self._is_open_window_timestamp is not None and self._zoneReactDelay is not None) else None
-                _LOGGER.debug("Is window open changed to %s", is_open_window)
+                _LOGGER.warning("Is window open changed for %s to %s", self._zoneName, is_open_window)
 
     def calculate_is_openwindow(self)->bool:
         if len(self._temperature_history)<=1:
             return False
-        temp_diff=abs(self._temperature_history[0]._temp - self._temperature_history[len(self._temperature_history)-1]._temp)
+        temp_diff= self._temperature_history[0]._temp - self._temperature_history[len(self._temperature_history)-1]._temp
         time_diff=self._temperature_history[len(self._temperature_history)-1]._temp_timestamp - self._temperature_history[0]._temp_timestamp
         #_LOGGER.info("calculating calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
-
+        time_limit = max(self._timedelta, self._mintimedelta if self._mintimedelta is not None else self._timedelta)
+        
         result = True
-        if time_diff.total_seconds() == 0 or temp_diff/time_diff.total_seconds() <= self._steep or (self._mintimedelta is not None and time_diff.total_seconds()<self._mintimedelta.total_seconds()):
+        if temp_diff < 0 or time_diff.total_seconds() == 0 or temp_diff/time_diff.total_seconds() <= self._steep or (time_diff <time_limit):
             result = False
 
         if result != self._is_open_window:
-            _LOGGER.debug("calculate_is_openwindow len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
+            _LOGGER.info("calculate_is_openwindow %s len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", self._zoneName, len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
 
         return result
         
@@ -217,6 +223,8 @@ class ZoneDef():
         self._name = name 
         self._target_temp = target_temp
         self._openWindow = openWindow
+        if (self._openWindow):
+            self._openWindow._zoneName = name
         self._saved_target_temp = None
         #if self._target_entity_id and (isinstance(self._target_entity_id, float) or isinstance(self._target_entity_id, int)):
         #    self._target_temp = float(self._target_entity_id);
@@ -773,7 +781,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                         return
 
             isValidTemp = (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid())
-
+			
             target_temp_value = float(self._selected_zone._target_temp)
             cur_temp_value = float(self._selected_zone._cur_temp)
 
