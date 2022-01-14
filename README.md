@@ -93,6 +93,49 @@ custom_components/multizone_generic_thermostat/services.yaml
 
 ## Configuration is done in configuration.yaml
 ```text
+input_number:
+  min_ambiental_temperature:
+    name: Min ambiental temperature
+    initial: 21
+    min: 14
+    max: 25
+    step: 0.1
+    
+  min_dining_temperature:
+    name: Min dining temperature
+    initial: 20
+    min: 14
+    max: 25
+    step: 0.1
+    
+  min_kitchen_temperature:
+    name: Min kitchen temperature
+    initial: 20
+    min: 14
+    max: 25
+    step: 0.1
+    
+  min_fabians_bedroom_temperature:
+    name: Min Fabian's bedroom temperature
+    initial: 20
+    min: 14
+    max: 25
+    step: 0.1     
+    
+  min_small_bedroom_temperature:
+    name: Min small bedroom temperature
+    initial: 18
+    min: 14
+    max: 25
+    step: 0.1        
+    
+  min_ioanas_bedroom_temperature:
+    name: Min Ioana's bedroom temperature
+    initial: 21
+    min: 14
+    max: 25
+    step: 0.1  
+    
 climate:
   - platform: multizone_generic_thermostat
     name: Thermostat
@@ -155,6 +198,13 @@ climate:
     precision: 0.1     
 ```	
 <!---->
+
+Additionally I added inside pyscript a script to be used with pyscript addon. This script can be used to automate much easier target temperatures per each room per each day of the week/per whatever time intervals you want.
+
+For example, I want every weekday at 7 AM to heat up little bit my son's room to be warmer when he dresses for school.
+At 7:40 when he should be gone to school already, I change it down back to lower temperature. Etc...
+
+Install pyscript integration. Copy the pyscript/thermostatautomation.py onto your homeassistant pyscript folder (if folder is missing, create pyscript folder on the same level with your configuration.yaml smd place the thermostatautomation.py file inside this folder)
 
 ## Contributions are welcome!
 
