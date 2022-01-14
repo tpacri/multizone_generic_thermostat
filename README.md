@@ -199,7 +199,10 @@ climate:
 ```	
 <!---->
 
-Additionally I added inside pyscript a script to be used with pyscript addon. This script can be used to automate much easier target temperatures per each room per each day of the week/per whatever time intervals you want.
+Automation suggestion:
+These step is optional. Only install pyscript and use my script for automating it if u find it usefull. I find it very handy, that's why I decided to put it here.
+
+Additionally I added inside pyscript folder a script to be used with pyscript addon. This script can be used to automate much easier target temperatures per each room per each day of the week/per whatever time intervals you want.
 
 For example, I want every weekday at 7 AM to heat up little bit my son's room to be warmer when he dresses for school.
 At 7:40 when he should be gone to school already, I change it down back to lower temperature. Etc...
