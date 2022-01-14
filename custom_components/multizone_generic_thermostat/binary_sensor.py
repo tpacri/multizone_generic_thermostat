@@ -45,11 +45,21 @@ class IsWindowOpenSensor(BinarySensorEntity):
         uid = f"{name}_is_window_open"
         self.entity_id = async_generate_entity_id(ENTITY_ID_FORMAT, uid, hass=hass)
         self._name = uid
-        self._is_window_open = False
+        self.zone_with_window_open = None
+        self.custom_attributes = {}
 
     @property
     def is_on(self):
-        return self._is_window_open
+        return self.zone_with_window_open != None
+        
+    @property
+    def zone_name(self):
+        return self.zone_with_window_open
+        
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes of the sensor."""
+        return {'zone': self.zone_with_window_open}        
 
     @property
     def device_class(self):
@@ -66,11 +76,11 @@ class IsWindowOpenSensor(BinarySensorEntity):
         """Return name."""
         return self._name
 
-    def set_is_window_open(self, value):
-        if value != self._is_window_open:
-            self._is_window_open = value
+    def set_zone_with_window_open(self, zone):
+        if zone != self.zone_with_window_open:
+            self.zone_with_window_open = zone           
+            
             self.async_write_ha_state()
-
 #    @asyncio.coroutine
 #    async def async_update(self):
 #        pass
