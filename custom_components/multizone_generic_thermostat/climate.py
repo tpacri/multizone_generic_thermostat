@@ -249,7 +249,8 @@ class ZoneDef():
         return is_temp_valid(self._target_temp)
 
     def get_cur_temp(self):
-        return max(self._cur_temp_per_sensor.values()) if self._cur_temp_per_sensor else None
+        filtered = list(filter(lambda temp: is_temp_valid(temp), self._cur_temp_per_sensor.values()))
+        return max(filtered) if self._cur_temp_per_sensor and filtered else None
         
     def set_cur_temp(self, sender_sensor, cur_temp):
         self._cur_temp_per_sensor[sender_sensor] = cur_temp
@@ -492,7 +493,18 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             #        obj.state = sensor_state
                     #self._async_update_target_temp(z, obj)
             #        self.async_write_ha_state()
-            self.async_write_ha_state()
+            #self.async_write_ha_state()
+            
+            _LOGGER.debug("Initial set of target temps")
+            for p in self._presets:
+                _LOGGER.debug("Initial set of target temps for preset %s", p._friendly_name)
+                for z in p._zones:
+                    _LOGGER.debug("Initial set of target temps for preset %s Zone: %s | Target sensor id:%s", p._friendly_name, z._friendly_name, z._target_entity_id)
+                    target_value = self.hass.states.get(z._target_entity_id)
+                    _LOGGER.debug("Initial set of target temp: %s Zone: %s Target:%s Target Value:%s", p._friendly_name, z._friendly_name, z._target_entity_id, target_value)
+                    self._async_update_target_temp(z, target_value)
+                      
+            self.async_write_ha_state()  
             
         if self.hass.state == CoreState.running:
             _async_startup()
