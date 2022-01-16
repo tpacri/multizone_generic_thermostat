@@ -814,6 +814,12 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
             isValidTemp = (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid())
             
+            if not isValidTemp:
+                self._ongoing_zone = None
+                self.select_worst_zone()
+                _LOGGER.debug("_async_control_heating skipped because temps are invalid Zone:%s CurTemp:%s TargetTemp:%s", self._selected_zone._name, self._selected_zone.get_cur_temp(), self._selected_zone._target_temp)
+                return
+                
             target_temp_value = float(self._selected_zone._target_temp)
             cur_temp_value = float(self._selected_zone.get_cur_temp())
 
