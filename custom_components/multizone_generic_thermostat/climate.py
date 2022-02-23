@@ -220,7 +220,70 @@ class OpenWindowDef():
             _LOGGER.info("calculate_is_openwindow %s len:%s Dtemp:%s DTime:%s DSeconds:%s Steep:%s TargetSteep:%s", self._zoneName, len(self._temperature_history), temp_diff, time_diff, time_diff.total_seconds(), temp_diff/time_diff.total_seconds(), self._steep)
 
         return result
+
+class TempAggregator():
+    def __init__(self, name):
+        self._name = name
+        self._cur_temp_per_sensor = {}
+        self.last_valid_temp_per_sensor = {}
+        self.active_sensor = None
+        self.default_failuresLimit = 3
+
+    def set_cur_temp(self, sender_sensor, cur_temp):
+        self._cur_temp_per_sensor[sender_sensor] = cur_temp
+        if (is_temp_valid(cur_temp)):
+            _LOGGER.debug("TempAggregator: set_cur_temp is_temp_valid %s: %s - %s", self._name, sender_sensor, cur_temp)
+            self.last_valid_temp_per_sensor[sender_sensor] = {'sensor': sender_sensor, 'time': datetime.now(), 'value': cur_temp, 'failures': 0}
+        else:
+            if sender_sensor not in self.last_valid_temp_per_sensor:
+                _LOGGER.debug("TempAggregator: set_cur_temp not valid and new %s: %s - %s", self._name, sender_sensor, cur_temp)
+                self.last_valid_temp_per_sensor[sender_sensor] = {'sensor': sender_sensor, 'time': datetime.now(), 'value': cur_temp, 'failures': 1}
+            else:
+                _LOGGER.debug("TempAggregator: set_cur_temp not valid and existing %s: %s - %s", self._name, sender_sensor, cur_temp)
+                self.last_valid_temp_per_sensor[sender_sensor]['failures'] = self.last_valid_temp_per_sensor[sender_sensor]['failures'] + 1
+
+    def is_timetemp_valid(self, timeTemp, failuresLimit):
+        time_limit = datetime.now()-timedelta(minutes=15)
+        if is_temp_valid(timeTemp['value']) and timeTemp['time']>=time_limit and timeTemp['failures']<=failuresLimit:
+            return True
+        return False
+
+    def getValidTimeTemp(self, sensor_name):
+        if sensor_name is None:
+            return None
+
+        if sensor_name not in self.last_valid_temp_per_sensor:
+            return None
+            
+        timeTemp = self.last_valid_temp_per_sensor[sensor_name]
+        if self.is_timetemp_valid(timeTemp, self.default_failuresLimit):
+            return timeTemp
         
+        return None
+
+    def get_cur_temp(self):
+        if self._cur_temp_per_sensor and all(self.is_timetemp_valid(x, 0) for x in self.last_valid_temp_per_sensor.values()):
+            mxval = max(self._cur_temp_per_sensor.values())
+            _LOGGER.debug("TempAggregator: get_cur_temp all valid %s: %s", self._name, mxval)
+            return mxval
+            
+        current_sensor_timetemp = self.getValidTimeTemp(self.active_sensor)
+        if current_sensor_timetemp is not None:
+            _LOGGER.debug("TempAggregator: get_cur_temp current_sensor_timetemp %s: %s", self._name, current_sensor_timetemp['value'])
+            return current_sensor_timetemp['value']
+
+        validSensors = list(filter(lambda mappedTimeTemp: self.is_timetemp_valid(mappedTimeTemp, self.default_failuresLimit), self.last_valid_temp_per_sensor.values()))
+
+        validSensors.sort(key=lambda x: x['time'], reverse=True)
+        if validSensors:
+            oldActiveSensor = self.active_sensor
+            self.active_sensor = validSensors[0]['sensor']
+            _LOGGER.info("Active sensor temp changed %s: from %s to %s(%s)", self._name, oldActiveSensor, self.active_sensor, validSensors[0])
+            return validSensors[0]['value']
+
+        _LOGGER.info("TempAggregator: get_cur_temp None %s %s", self._name, self.last_valid_temp_per_sensor.values())
+        return None
+
 class ZoneDef():
     def __init__(self, friendly_name, sensor_entity_id, sensors_entity_id, target_entity_id, target_temp, name, openWindow):
         self._friendly_name = friendly_name or name
@@ -234,7 +297,7 @@ class ZoneDef():
         self._saved_target_temp = None
         #if self._target_entity_id and (isinstance(self._target_entity_id, float) or isinstance(self._target_entity_id, int)):
         #    self._target_temp = float(self._target_entity_id);
-        self._cur_temp_per_sensor = {}
+        self._cur_temp_per_sensor = TempAggregator(name)
 
     def has_temp_sensor_defined(self):
         return self._sensors_entity_id is not None
@@ -249,11 +312,10 @@ class ZoneDef():
         return is_temp_valid(self._target_temp)
 
     def get_cur_temp(self):
-        filtered = list(filter(lambda temp: is_temp_valid(temp), self._cur_temp_per_sensor.values()))
-        return max(filtered) if self._cur_temp_per_sensor and filtered else None
+        return self._cur_temp_per_sensor.get_cur_temp()
         
     def set_cur_temp(self, sender_sensor, cur_temp):
-        self._cur_temp_per_sensor[sender_sensor] = cur_temp
+        self._cur_temp_per_sensor.set_cur_temp(sender_sensor, cur_temp)
         if self._openWindow is not None:
             self._openWindow.add_temp(self.get_cur_temp())
 
@@ -600,7 +662,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def current_temperature(self):
         """Return the sensor temperature."""
+        _LOGGER.debug("current_temperature +++ %s - %s", self._ongoing_zone._name if self._ongoing_zone else 'None', self._selected_zone._name if self._selected_zone else 'None')
         cur_temp = (self._ongoing_zone or self._selected_zone).get_cur_temp()
+        _LOGGER.debug("current_temperature is %s - %s - %s", self._ongoing_zone._name if self._ongoing_zone else 'None', self._selected_zone._name if self._selected_zone else 'None', cur_temp)
         return float(cur_temp) if is_temp_valid(cur_temp) else None
 
     @property
@@ -757,7 +821,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     def _async_update_temp(self, zone, sender_sensor, state):
         """Update thermostat with latest state from sensor."""
         try:
-            _LOGGER.debug("zone sensor value updated. %s-%s: - set %s<%s", zone._name, sender_sensor, zone._target_temp, state.state)
+            _LOGGER.debug("zone sensor value updated.. %s-%s: - set %s<%s", zone._name, sender_sensor, zone._target_temp, state.state)
             zone.set_cur_temp(sender_sensor, state.state)
         except ValueError as ex:
             _LOGGER.error("Unable to update %s from sensor: %s", zone._name, ex)
