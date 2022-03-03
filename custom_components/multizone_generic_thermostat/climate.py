@@ -244,7 +244,7 @@ class TempAggregator():
 
     def is_timetemp_valid(self, timeTemp, failuresLimit):
         time_limit = datetime.now()-timedelta(minutes=15)
-        if is_temp_valid(timeTemp['value']) and timeTemp['time']>=time_limit and timeTemp['failures']<=failuresLimit:
+        if is_temp_valid(timeTemp['value']) and ((timeTemp['time']>=time_limit and timeTemp['failures']<=failuresLimit) or timeTemp['failures']==0):
             return True
         return False
 
@@ -262,9 +262,15 @@ class TempAggregator():
         return None
 
     def get_cur_temp(self):
-        if self._cur_temp_per_sensor and all(self.is_timetemp_valid(x, 0) for x in self.last_valid_temp_per_sensor.values()):
-            mxval = max(self._cur_temp_per_sensor.values())
-            _LOGGER.debug("TempAggregator: get_cur_temp all valid %s: %s", self._name, mxval)
+        if self._cur_temp_per_sensor and self.last_valid_temp_per_sensor and all(self.is_timetemp_valid(x, 0) for x in self.last_valid_temp_per_sensor.values()):
+            maxTimeTemp = max(self.last_valid_temp_per_sensor.values(), key = lambda k: k['value'])
+            maxSensorName = maxTimeTemp['sensor']
+            if maxSensorName != self.active_sensor:
+                _LOGGER.info("TempAggregator: all valid. Active sensor temp changed %s: from %s to %s(%s)", self._name, self.active_sensor, maxSensorName, self.last_valid_temp_per_sensor.values())
+            self.active_sensor = maxSensorName
+            mxval = maxTimeTemp['value']
+            #mxval = max(self._cur_temp_per_sensor.values())
+            _LOGGER.debug("TempAggregator: get_cur_temp all valid %s %s: %s", self._name, self.active_sensor, mxval)
             return mxval
             
         current_sensor_timetemp = self.getValidTimeTemp(self.active_sensor)
@@ -278,7 +284,7 @@ class TempAggregator():
         if validSensors:
             oldActiveSensor = self.active_sensor
             self.active_sensor = validSensors[0]['sensor']
-            _LOGGER.info("Active sensor temp changed %s: from %s to %s(%s)", self._name, oldActiveSensor, self.active_sensor, validSensors[0])
+            _LOGGER.info("TempAggregator: Active sensor temp changed %s: from %s to %s(%s)", self._name, oldActiveSensor, self.active_sensor, self.last_valid_temp_per_sensor.values())
             return validSensors[0]['value']
 
         _LOGGER.info("TempAggregator: get_cur_temp None %s %s", self._name, self.last_valid_temp_per_sensor.values())
