@@ -340,7 +340,7 @@ class PresetDef():
     def get_zone_with_open_window(self):
         if (self._zones == None or len(self._zones)==0):
             return None
-        return next((z._name for z in self._zones if z.is_zone_with_open_window()), None)
+        return next((z._friendly_name for z in self._zones if z.is_zone_with_open_window()), None)
 
 def parse_openwindow(config):
     if config is None:
@@ -833,7 +833,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             _LOGGER.error("Unable to update %s from sensor: %s", zone._name, ex)
 
     def select_worst_zone(self):
-        if not self._ongoing_zone is None: 
+        if (self._ongoing_zone is not None) and (self._ongoing_zone.is_cur_temp_valid()): 
             self._selected_zone = self._ongoing_zone
             return
 
