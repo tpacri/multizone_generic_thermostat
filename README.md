@@ -137,6 +137,7 @@ input_number:
     step: 0.1  
     
 climate:
+
   - platform: multizone_generic_thermostat
     name: Thermostat
     heater: switch.heating 
@@ -144,45 +145,36 @@ climate:
         none:
             report_zone_name_instead_preset_name: true
             zones:
-                ambiental:
-                    target_sensor: sensor.thermostat_ambiental_temperature
-                    target_temp_sensor: input_number.min_ambiental_temperature
-                ambiental2:
-                    target_sensor: sensor.thermostat_ambiental_temperature2
-                    target_temp_sensor: input_number.min_ambiental_temperature
                 dining:
-                    target_sensor: sensor.dining_room_temperature
+                    target_sensors:
+                        - sensor.dining_room_temperature2
+                        - sensor.mi_dining_temperature
                     target_temp_sensor: input_number.min_dining_temperature
-                kitchen:
-                    target_sensor: sensor.kitchen_temperature
-                    target_temp_sensor: input_number.min_kitchen_temperature
-                kids_bedroom:
-                    friendly_name: kids bedroom
-                    target_sensor: sensor.kids_bedroom_temperature
-                    target_temp_sensor: input_number.min_kids_bedroom_temperature
+                fabians_bedroom:
+                    friendly_name: Fabian's bedroom
+                    target_sensors: 
+                        - sensor.fabians_bedroom_temperature
+                        - sensor.mi_fabian_bedroom_temperature
+                    target_temp_sensor: input_number.min_fabians_bedroom_temperature
                 small_bedroom:
                     friendly_name: small bedroom
                     target_sensor: sensor.small_bedroom_temperature
                     target_temp_sensor: input_number.min_small_bedroom_temperature
-                gaming_room:
-                    friendly_name: gaming room
-                    target_sensor: sensor.gaming_room_temperature
-                    target_temp_sensor: input_number.min_gaming_room_temperature
-                    open_window:
-                        delta_temp: 2
-                        delta_time: 100
-                        zone_react_delay: 00:10:00                    
-                test:
-                    target_sensor: input_number.test_temperature
-                    target_temp_sensor: input_number.min_test_temperature
-                test2:
-                    target_sensor: input_number.test_temperature2
-                    target_temp_sensor: input_number.min_test_temperature2
+                ioanas_bedroom:
+                    friendly_name: Ioana's bedroom
+                    target_sensor: sensor.ioanas_bedroom_temperature
+                    target_temp_sensor: input_number.min_ioanas_bedroom_temperature
+                    #open_window:
+                    #    delta_temp: 4
+                    #    delta_time: 100
+                    #    zone_react_delay: 00:10:00    
     open_window:
-        delta_temp: 2
+        delta_temp: 0.25
         min_delta_time: 60
         delta_time: 180
         zone_react_delay: 00:10:00
+        ignored_target_sensors:
+            - sensor.thermostat_ambiental_temperature
     min_temp: 17
     max_temp: 25
     ac_mode: false
