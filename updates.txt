@@ -8,3 +8,5 @@
 	User can define presets, and in each preset can define a list of zones. Thermostat will use only the selected Preset for controlling heating/cooling. Presets can be changed manually
 	
 3. Added a hack	in presets to allow display on default termostat card the coldest zone based on the set limits (check pictures). Thic can be achieved only by setting report_zone_name_instead_preset_name: true in a preset. With this hack on, you will see the coldest zone name on the thermostat card like in the picture and know what zone triggered heating, or what zone is about to trigger heating
+
+4. Added option to ignore specific sensors for being used in "open window" detection

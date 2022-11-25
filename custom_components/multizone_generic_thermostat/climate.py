@@ -89,6 +89,7 @@ CONF_MIN_DELTA_TIME="min_delta_time"
 CONF_DELTA_TIME="delta_time"
 CONF_OPEN_WINDOW="open_window"
 CONF_ZONE_REACT_DELAY="zone_react_delay"
+CONF_IGNORED_TEMP_SENSORS = "ignored_target_sensors"
 
 SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE
 
@@ -98,6 +99,7 @@ OPEN_WINDIW_SCHEMA = vol.Schema(
             vol.Required(CONF_DELTA_TIME): cv.time_period,
             vol.Optional(CONF_MIN_DELTA_TIME): cv.time_period,
             vol.Optional(CONF_ZONE_REACT_DELAY): cv.time_period,
+            vol.Optional(CONF_IGNORED_TEMP_SENSORS, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
         }
     )
 
@@ -176,7 +178,7 @@ class TempWithTime():
         self._temp_timestamp = temp_timestamp
 
 class OpenWindowDef():
-    def __init__(self, delta, timediff, mintimediff, zoneReactDelay):
+    def __init__(self, delta, timediff, mintimediff, zoneReactDelay, ignored_sensors_entity_id):
         self._delta = abs(delta)
         self._timedelta = timediff
         self._mintimedelta = mintimediff
@@ -187,8 +189,15 @@ class OpenWindowDef():
         self._is_open_window_timestamp = None
         self._zone_react_timestamp = None
         self._zoneName = "not set yet"
+        self._ignored_sensors_entity_id = ignored_sensors_entity_id
 
-    def add_temp(self, temp):
+    def is_sensor_ignored(self, sensor_id):
+        return self._ignored_sensors_entity_id is not None and sensor_id in self._ignored_sensors_entity_id
+        
+    def add_temp(self, sender_sensor, temp):
+        if self.is_sensor_ignored(sender_sensor):
+            return
+            
         if is_temp_valid(temp):
             self._temperature_history.append(TempWithTime(float(temp), datetime.now()))
             time_limit = datetime.now()-max(self._timedelta, self._mintimedelta if self._mintimedelta is not None else self._timedelta)
@@ -323,7 +332,7 @@ class ZoneDef():
     def set_cur_temp(self, sender_sensor, cur_temp):
         self._cur_temp_per_sensor.set_cur_temp(sender_sensor, cur_temp)
         if self._openWindow is not None:
-            self._openWindow.add_temp(self.get_cur_temp())
+            self._openWindow.add_temp(sender_sensor, self.get_cur_temp())
 
     def is_zone_with_open_window(self) -> bool:
         if self._openWindow is None:
@@ -349,8 +358,9 @@ def parse_openwindow(config):
     deltaTime = config[CONF_DELTA_TIME]
     minDeltaTime = config[CONF_MIN_DELTA_TIME] if CONF_MIN_DELTA_TIME in config else None
     zoneReactDelay = config[CONF_ZONE_REACT_DELAY] if CONF_ZONE_REACT_DELAY in config else None
+    ignoredTempSensors = config[CONF_IGNORED_TEMP_SENSORS] if (CONF_IGNORED_TEMP_SENSORS in config) else None
     
-    return OpenWindowDef(delta, deltaTime, minDeltaTime, zoneReactDelay)
+    return OpenWindowDef(delta, deltaTime, minDeltaTime, zoneReactDelay, ignoredTempSensors)
 
 def parse_zones_dict(explicit_zones, default_openwindow):
     zones = []
