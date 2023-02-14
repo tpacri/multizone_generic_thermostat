@@ -91,6 +91,18 @@ CONF_OPEN_WINDOW="open_window"
 CONF_ZONE_REACT_DELAY="zone_react_delay"
 CONF_IGNORED_TEMP_SENSORS = "ignored_target_sensors"
 
+CONF_RULES = "rules"
+CONF_RULES_ENABLE_SENSOR = "enable_sensor"
+
+CONF_MAX_HEATER_TEMP_RULE = "max_heater_temp_rule"
+CONF_MAX_HEATER_TEMP_RULE_TEMP_SENSORS = "heater_temp_sensors"
+CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP = "max_temp"
+CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP_TOLERANCE = "tolerance"
+
+CONF_ON_DURATION_RULE = "on_duration_rule"
+CONF_MAX_ON_DURATION = "max_on_duration"
+CONF_MIN_OFF_DURATION = "min_off_duration"
+
 SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE
 
 OPEN_WINDIW_SCHEMA = vol.Schema(
@@ -99,10 +111,25 @@ OPEN_WINDIW_SCHEMA = vol.Schema(
             vol.Required(CONF_DELTA_TIME): cv.time_period,
             vol.Optional(CONF_MIN_DELTA_TIME): cv.time_period,
             vol.Optional(CONF_ZONE_REACT_DELAY): cv.time_period,
-            vol.Optional(CONF_IGNORED_TEMP_SENSORS, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+            vol.Optional(CONF_IGNORED_TEMP_SENSORS, default=[]): vol.All(cv.ensure_list, [cv.entity_id])
         }
     )
 
+MAX_HEATER_TEMP_RULE_SCHEMA = vol.Schema(
+        {
+            vol.Required(CONF_MAX_HEATER_TEMP_RULE_TEMP_SENSORS, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+            vol.Required(CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP): vol.Coerce(float),
+            vol.Required(CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP_TOLERANCE): vol.Coerce(float) 
+        }
+    )
+    
+ON_DURATION_RULE_SCHEMA = vol.Schema(
+        {
+            vol.Required(CONF_MAX_ON_DURATION): cv.time_period,
+            vol.Required(CONF_MIN_OFF_DURATION): cv.time_period
+        }
+    )    
+    
 ZONE_SCHEMA = vol.All(
     vol.Schema(
         {
@@ -119,6 +146,15 @@ ZONE_SCHEMA = vol.All(
     cv.has_at_least_one_key(CONF_TARGET_TEMP, CONF_TARGET_TEMP_SENSOR),
     cv.has_at_most_one_key(CONF_TARGET_TEMP, CONF_TARGET_TEMP_SENSOR))
 
+RULES_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional(CONF_RULES_ENABLE_SENSOR): cv.entity_id,
+            vol.Optional(CONF_MAX_HEATER_TEMP_RULE): vol.Schema(MAX_HEATER_TEMP_RULE_SCHEMA),
+            vol.Optional(CONF_ON_DURATION_RULE): vol.Schema(ON_DURATION_RULE_SCHEMA)
+        }
+    ))
+    
 PRESET_SCHEMA = vol.Schema({
     vol.Optional(ZONES): cv.schema_with_slug_keys(ZONE_SCHEMA),
 })
@@ -129,6 +165,7 @@ PRESET_SCHEMA = vol.All(
             vol.Optional(ATTR_FRIENDLY_NAME): cv.string,
             vol.Required(ZONES): vol.All(cv.schema_with_slug_keys(ZONE_SCHEMA)),
             vol.Optional(CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME): cv.boolean,
+            vol.Optional(CONF_RULES): vol.Schema(RULES_SCHEMA)
         }
     ))
 
@@ -158,7 +195,8 @@ PLATFORM_SCHEMA = vol.All(
             [PRECISION_TENTHS, PRECISION_HALVES, PRECISION_WHOLE]
         ),
         vol.Optional(CONF_UNIQUE_ID): cv.string,
-        vol.Optional(CONF_OPEN_WINDOW): vol.Schema(OPEN_WINDIW_SCHEMA)
+        vol.Optional(CONF_OPEN_WINDOW): vol.Schema(OPEN_WINDIW_SCHEMA), 
+        vol.Optional(CONF_RULES): vol.Schema(RULES_SCHEMA)
     },
 #    cv.has_at_most_one_key(CONF_SENSOR, CONF_TEMP_SENSORS)
     ))
@@ -177,6 +215,107 @@ class TempWithTime():
         self._temp = temp
         self._temp_timestamp = temp_timestamp
 
+class Rules():
+    def __init__(self, enable_sensor, max_heater_temp_rule,  max_on_duration_rule):
+        self._enable_sensor = enable_sensor
+        self._enable_sensor_state = True if enable_sensor is None else False
+        self._max_heater_temp_rule = max_heater_temp_rule
+        self._max_on_duration_rule = max_on_duration_rule
+        _LOGGER.warning("Rules %s", self._enable_sensor)
+        
+        
+class MaxHeaterTempRuleDef():
+    def __init__(self, sensors, max_temp, tolerance):
+        self._sensors_entity_id = sensors
+        self._max_temp = max_temp
+        self._tolerance = tolerance
+        self._current_temperatures = {}
+        self._sensors_exceeding_limit = {}
+        
+    def _async_on_heater_temp_changed(self, event):
+        """Handle heater temperature changes."""
+        sender = event.data.get("entity_id")
+        new_state = event.data.get("new_state")
+        
+        if new_state is None or not is_temp_valid(new_state.state) or sender not in self._sensors_entity_id:
+            _LOGGER.info("INNER _async_on_heater_temp_changed SKIPPED %s %s", sender, new_state)
+            return
+        
+        _LOGGER.info("MaxHeaterTempRuleDef: heater_temp changed. %s %s %s", sender, new_state.state, sender in self._sensors_exceeding_limit)
+
+        temp = float(new_state.state)
+        self._current_temperatures[sender] = TempWithTime(temp, datetime.now())
+        
+        if temp > self._max_temp:
+            isNewlyExceeded = sender not in self._sensors_exceeding_limit
+            self._sensors_exceeding_limit[sender] = datetime.now()
+            
+            #if isNewlyExceeded:
+            #    _LOGGER.warning("MaxHeaterTempRuleDef: sensor exceeding limit %s>%s=%s %s", temp, self._max_temp, self.is_heating_allowed(), self._sensors_exceeding_limit)
+            
+        if sender in self._sensors_exceeding_limit and temp <= self._max_temp-self._tolerance:
+            self._sensors_exceeding_limit.pop(sender)
+            #_LOGGER.warning("MaxHeaterTempRuleDef: sensor NOT exceeding limit anymore %s>%s=%s %s", temp, self._max_temp, self.is_heating_allowed(), self._sensors_exceeding_limit)
+
+        _LOGGER.info("MaxHeaterTempRuleDef: is_heating_allowed  %s>%s=%s tol:%s minTmp:%s %s", temp, self._max_temp, self.is_heating_allowed(),self._tolerance, self._max_temp-self._tolerance, self._sensors_exceeding_limit)
+            
+    def is_heating_allowed(self):
+        if not self._sensors_exceeding_limit:
+            return True
+            
+        refTime  = datetime.now() - timedelta(minutes=5)
+        any_temp_blocking = any((t[0] in self._current_temperatures and self._current_temperatures[t[0]]._temp_timestamp >= refTime) for t in self._sensors_exceeding_limit.items())
+
+        _LOGGER.info("MaxHeaterTempRuleDef check any valid temp blocking = %s, ref: %s now: %s tt:%s", any_temp_blocking, refTime, datetime.now(), self._current_temperatures['sensor.temperature_mysensor_7_0']._temp_timestamp)
+        
+        return not any_temp_blocking
+
+class MaxOnDurationRuleDef():
+    def __init__(self, max_on_duration, min_off_duration):
+        self._max_on_duration = max_on_duration
+        self._min_off_duration = min_off_duration
+        self._on_time = None
+        self._off_time = None
+        self._on_time_exceeded = False
+        
+    def on_turned_on(self):
+        _LOGGER.info("calculate_if_time_exceeded - on_turned_on")
+        
+        if self._on_time:
+            return
+            
+        self._on_time = datetime.now()
+        self._off_time = None
+
+    def on_turned_off(self):
+        _LOGGER.info("calculate_if_time_exceeded - on_turned_off")
+        
+        if self._off_time:
+            return
+        
+        self._on_time = None
+        self._off_time = datetime.now()
+
+    def calculate_if_time_exceeded(self):
+        onTime = (datetime.now() - self._on_time) if self._on_time else None
+        offTime = (datetime.now() - self._off_time) if self._off_time else None
+        
+        if (onTime and onTime >=self._max_on_duration):
+            #if not self._on_time_exceeded:
+            #    _LOGGER.warning("MaxOnDurationRuleDef exceeded %s", onTime)
+        
+            self._on_time_exceeded = True
+            
+        if (self._on_time_exceeded and offTime and offTime >= self._min_off_duration):
+            #_LOGGER.warning("MaxOnDurationRuleDef CANCEL exceeded %s", offTime)
+            self._on_time_exceeded = False  
+
+        _LOGGER.info("calculate_if_time_exceeded %s %s>=%s %s>=%s", self._on_time_exceeded, onTime, self._max_on_duration, offTime, self._min_off_duration)
+        
+    def is_heating_allowed(self):
+        self.calculate_if_time_exceeded() 
+        return not self._on_time_exceeded         
+            
 class OpenWindowDef():
     def __init__(self, delta, timediff, mintimediff, zoneReactDelay, ignored_sensors_entity_id):
         self._delta = abs(delta)
@@ -340,11 +479,12 @@ class ZoneDef():
         return self._openWindow._is_open_window
 
 class PresetDef():
-    def __init__(self, friendly_name, zones, name, report_zone_name_instead_preset_name):
+    def __init__(self, friendly_name, zones, name, report_zone_name_instead_preset_name, rules):
         self._friendly_name = friendly_name or name
         self._name = name 
         self._zones = zones
         self._report_zone_name_instead_preset_name = report_zone_name_instead_preset_name
+        self._rules = rules
 
     def get_zone_with_open_window(self):
         if (self._zones == None or len(self._zones)==0):
@@ -362,6 +502,34 @@ def parse_openwindow(config):
     
     return OpenWindowDef(delta, deltaTime, minDeltaTime, zoneReactDelay, ignoredTempSensors)
 
+def parse_rules(config):
+    if config is None:
+        return Rules(None, None, None)
+        
+    enabled_sensor = config[CONF_RULES_ENABLE_SENSOR] if (CONF_RULES_ENABLE_SENSOR in config) else None 
+    max_heater_temp_rule= parse_max_heater_temp_rule(config[CONF_MAX_HEATER_TEMP_RULE]) if (CONF_MAX_HEATER_TEMP_RULE in config) else None
+    max_on_duration_rule= parse_max_on_duration_rule(config[CONF_ON_DURATION_RULE]) if (CONF_ON_DURATION_RULE in config) else None
+
+    return Rules(enabled_sensor, max_heater_temp_rule, max_on_duration_rule)
+    
+def parse_max_heater_temp_rule(config):
+    if config is None:
+        return None
+    sensors = config[CONF_MAX_HEATER_TEMP_RULE_TEMP_SENSORS] if (CONF_MAX_HEATER_TEMP_RULE_TEMP_SENSORS in config) else None
+    max_temp = config.get(CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP)
+    tolerance = config[CONF_MAX_HEATER_TEMP_RULE_MAX_TEMP_TOLERANCE]
+    
+    return MaxHeaterTempRuleDef(sensors, max_temp, tolerance)
+
+    
+def parse_max_on_duration_rule(config):
+    if config is None:
+        return None
+    max_on_duration = config.get(CONF_MAX_ON_DURATION)
+    min_off_duration = config[CONF_MIN_OFF_DURATION]
+    
+    return MaxOnDurationRuleDef(max_on_duration, min_off_duration)
+    
 def parse_zones_dict(explicit_zones, default_openwindow):
     zones = []
     try:
@@ -408,16 +576,21 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     unique_id = config.get(CONF_UNIQUE_ID)
     
     default_openwindow= parse_openwindow(config[CONF_OPEN_WINDOW]) if (CONF_OPEN_WINDOW in config) else None
+    default_rules=parse_rules(config[CONF_RULES]) if (CONF_RULES in config) else None
     global_zone = list(filter(lambda z: (z.has_temp_sensor_defined()) and (not z._target_entity_id is None), [ZoneDef("Global", sensor_entity_id0, sensors_entity_id0, target_temp_sensor0, target_temp0, "GlobalZone", default_openwindow)]))
 
     zones = global_zone + parse_zones_dict(explicit_zones, default_openwindow)
 
-    presets = list(filter(lambda p: len(p._zones) > 0, [PresetDef(PRESET_NONE, zones, PRESET_NONE, False)]))
+    presets = list(filter(lambda p: len(p._zones) > 0, [PresetDef(PRESET_NONE, zones, PRESET_NONE, False, default_rules)]))
 
     try:
         if explicit_presets:
             for key, p in explicit_presets.items():
-                presets.append(PresetDef(p[ATTR_FRIENDLY_NAME] if (ATTR_FRIENDLY_NAME in p) else None, parse_zones_dict(p[ZONES], default_openwindow), key, p[CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME] if (CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME in p) else None))
+                presets.append(PresetDef(p[ATTR_FRIENDLY_NAME] if (ATTR_FRIENDLY_NAME in p) else None, \
+                    parse_zones_dict(p[ZONES], default_openwindow), \
+                    key, \
+                    p[CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME] if (CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME in p) else None, \
+                    parse_rules(p[CONF_RULES]) if (CONF_RULES in p) else default_rules))
     except ValueError as ex:
                 _LOGGER.error("Unable to parse presets %s %s", explicit_presets, ex)
     except TypeError as ex:
@@ -488,6 +661,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         self._selected_preset = self._presets[0]
         self._selected_zone = self._selected_preset._zones[0]
         self._ongoing_zone = None
+        self._ongoing_zone_temporarely_turned_off_by_rules = None        
         self.ac_mode = ac_mode
         self.min_cycle_duration = min_cycle_duration
         self._cold_tolerance = cold_tolerance
@@ -539,6 +713,24 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     )
             )
 
+        if self._selected_preset._rules and self._selected_preset._rules._enable_sensor:
+            _LOGGER.warning("subscribe to rules enable sensor %s", self._selected_preset._rules._enable_sensor)
+            rules_enable_sensor_state = self.hass.states.get(self._selected_preset._rules._enable_sensor)
+            await self._handle_rules_enable_sensor_changed(rules_enable_sensor_state)
+            self.async_on_remove(
+                        async_track_state_change_event(
+                            self.hass, self._selected_preset._rules._enable_sensor, self._async_on_rules_enable_sensor_changed
+                        )
+                    )
+                    
+        if self._selected_preset._rules and self._selected_preset._rules._max_heater_temp_rule:
+            _LOGGER.info("subscribe to heat temp sensors %s", self._selected_preset._rules._max_heater_temp_rule._sensors_entity_id)
+            self.async_on_remove(
+                        async_track_state_change_event(
+                            self.hass, self._selected_preset._rules._max_heater_temp_rule._sensors_entity_id, self._async_on_heater_temp_changed
+                        )
+                    )
+                    
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass, [self.heater_entity_id], self._async_switch_changed
@@ -717,7 +909,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     def preset_mode(self):
         """Return the current preset mode, e.g., home, away, temp."""
         if self._selected_preset._report_zone_name_instead_preset_name == True:
-            return self._selected_zone._friendly_name
+            return self._selected_zone._friendly_name + (" [P]" if self._ongoing_zone_temporarely_turned_off_by_rules else "")
         return PRESET_AWAY if self._is_away else self._selected_preset._name # PRESET_AWAY if self._is_away else PRESET_NONE
 
     @property
@@ -774,6 +966,23 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         # Get default temp from super class
         return super().max_temp
 
+    async def _async_on_rules_enable_sensor_changed(self, event):
+        _LOGGER.warning("_async_on_rules_enable_sensor_changed")
+        new_state = event.data.get("new_state")
+        await self._handle_rules_enable_sensor_changed(self, new_state)
+        
+    async def _handle_rules_enable_sensor_changed(self, new_state):
+        self._selected_preset._rules._enable_sensor_state = new_state.state == STATE_ON
+        _LOGGER.warning("on_rules_enable_sensor_changed %s", self._selected_preset._rules._enable_sensor_state)
+        await self._async_control_heating()
+            
+    async def _async_on_heater_temp_changed(self, event):
+        _LOGGER.info("_async_on_heater_temp_changed")
+        
+        if self._selected_preset._rules and self._selected_preset._rules._max_heater_temp_rule:
+            self._selected_preset._rules._max_heater_temp_rule._async_on_heater_temp_changed(event)
+            await self._async_control_heating()
+        
     async def _async_target_changed(self, event):
         """Handle target temperature changes."""
         sender = event.data.get("entity_id")
@@ -846,7 +1055,11 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         if (self._ongoing_zone is not None) and (self._ongoing_zone.is_cur_temp_valid()): 
             self._selected_zone = self._ongoing_zone
             return
-
+            
+        if (self._ongoing_zone_temporarely_turned_off_by_rules is not None) and (self._ongoing_zone_temporarely_turned_off_by_rules.is_cur_temp_valid()): 
+            self._selected_zone = self._ongoing_zone_temporarely_turned_off_by_rules
+            return
+            
         sortedZones =list(sorted(filter(lambda z: (z.is_cur_temp_valid()) and (z.is_target_temp_valid()) and (z._openWindow is None or (z._openWindow._zone_react_timestamp is None or z._openWindow._zone_react_timestamp<=datetime.now())), self._selected_preset._zones), key=lambda z: float(z.get_cur_temp())  - float(z._target_temp)))
         if len(sortedZones) > 0:
             selected_zone = sortedZones[0]
@@ -858,8 +1071,11 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             self._selected_zone = selected_zone
 
     async def _async_control_heating(self, time=None, force=False):
+        _LOGGER.info("_async_control_heating +++")
+
         """Check if we need to turn heating on or off."""
         async with self._temp_lock:
+            _LOGGER.info("_async_control_heating inside _temp_lock")
             self.select_worst_zone()
             if not self._active and (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid()):
                 self._active = True
@@ -871,6 +1087,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                 )
 
             if not self._active or self._hvac_mode == HVAC_MODE_OFF:
+                _LOGGER.info("_async_control_heating exit - nota active")
                 return
 
             if not force and time is None:
@@ -878,7 +1095,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                 # ignore `min_cycle_duration`.
                 # If the `time` argument is not none, we were invoked for
                 # keep-alive purposes, and `min_cycle_duration` is irrelevant.
-                if self.min_cycle_duration:
+                _LOGGER.info("_async_control_heating if not force and time is None")
+                
+                if self.min_cycle_duration and self._is_heater_valid():
                     if self._is_device_active:
                         current_state = STATE_ON
                     else:
@@ -890,6 +1109,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                         self.min_cycle_duration,
                     )
                     if not long_enough:
+                        _LOGGER.info("_async_control_heating exit not long_enough %s vs %s: %s", current_state, self.min_cycle_duration, long_enough)
                         return
 
             isValidTemp = (self._selected_zone.is_cur_temp_valid()) and (self._selected_zone.is_target_temp_valid())
@@ -905,6 +1125,33 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
             too_cold = isValidTemp and (target_temp_value >= cur_temp_value + self._cold_tolerance)
             too_hot = isValidTemp and (cur_temp_value >= target_temp_value + self._hot_tolerance)
+            
+            _LOGGER.info("_async_control_heating - CHECK rules (%s) - (%s) - (%s)", self._selected_preset._rules._enable_sensor_state if self._selected_preset._rules else "No rules set", self._ongoing_zone._name if self._ongoing_zone else "No Ongoing Zone", self._ongoing_zone_temporarely_turned_off_by_rules._name if self._ongoing_zone_temporarely_turned_off_by_rules else "No paused zone")
+
+            if self._selected_preset._rules and self._selected_preset._rules._enable_sensor_state:
+                if self._selected_preset._rules._max_heater_temp_rule and not self._selected_preset._rules._max_heater_temp_rule.is_heating_allowed():
+                    _LOGGER.info("_async_control_heating stopped because of max_heater_temp_rule")
+                    self._ongoing_zone_temporarely_turned_off_by_rules = self._ongoing_zone_temporarely_turned_off_by_rules or self._ongoing_zone
+                    await self._async_heater_turn_off()
+                    return
+                    
+                if self._selected_preset._rules._max_on_duration_rule and not self._selected_preset._rules._max_on_duration_rule.is_heating_allowed():
+                    _LOGGER.info("_async_control_heating stopped because of max_on_time_rule")
+                    self._ongoing_zone_temporarely_turned_off_by_rules = self._ongoing_zone_temporarely_turned_off_by_rules or self._ongoing_zone
+                    await self._async_heater_turn_off()
+                    return  
+
+                if self._ongoing_zone_temporarely_turned_off_by_rules:
+                    _LOGGER.info("_async_control_heating - detected _ongoing_zone_temporarely_turned_off_by_rules %s", self._ongoing_zone_temporarely_turned_off_by_rules._name)
+                    self._ongoing_zone = self._selected_zone
+                    self._ongoing_zone_temporarely_turned_off_by_rules = None
+                    await self._async_heater_turn_on()
+            else:
+                _LOGGER.info("_async_control_heating - clear _ongoing_zone_temporarely_turned_off_by_rules")
+                self._ongoing_zone_temporarely_turned_off_by_rules = None
+
+            _LOGGER.info("_async_control_heating - rules PASSED")
+            
             if self._is_device_active:
                 if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
                     _LOGGER.info("Turning off heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, target_temp_value, cur_temp_value)
@@ -944,6 +1191,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """If the toggleable device is currently active."""
         return self.hass.states.is_state(self.heater_entity_id, STATE_ON)
 
+    def _is_heater_valid(self):
+        return (not self.hass.states.is_state(self.heater_entity_id, STATE_UNAVAILABLE)) and (not self.hass.states.is_state(self.heater_entity_id, STATE_UNKNOWN))
+        
     @property
     def supported_features(self):
         """Return the list of supported features."""
@@ -951,6 +1201,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
     async def _async_heater_turn_on(self):
         """Turn heater toggleable device on."""
+        if self._selected_preset._rules and self._selected_preset._rules._max_on_duration_rule:
+            self._selected_preset._rules._max_on_duration_rule.on_turned_on()
+                
         data = {ATTR_ENTITY_ID: self.heater_entity_id}
         await self.hass.services.async_call(
             HA_DOMAIN, SERVICE_TURN_ON, data, context=self._context
@@ -958,6 +1211,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
     async def _async_heater_turn_off(self):
         """Turn heater toggleable device off."""
+        if self._selected_preset._rules and self._selected_preset._rules._max_on_duration_rule:
+            self._selected_preset._rules._max_on_duration_rule.on_turned_off()
+        
         data = {ATTR_ENTITY_ID: self.heater_entity_id}
         await self.hass.services.async_call(
             HA_DOMAIN, SERVICE_TURN_OFF, data, context=self._context
