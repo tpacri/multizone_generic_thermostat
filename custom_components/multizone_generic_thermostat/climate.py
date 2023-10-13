@@ -969,11 +969,11 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     async def _async_on_rules_enable_sensor_changed(self, event):
         _LOGGER.warning("_async_on_rules_enable_sensor_changed")
         new_state = event.data.get("new_state")
-        await self._handle_rules_enable_sensor_changed(self, new_state)
+        await self._handle_rules_enable_sensor_changed(new_state)
         
     async def _handle_rules_enable_sensor_changed(self, new_state):
         self._selected_preset._rules._enable_sensor_state = new_state.state == STATE_ON
-        _LOGGER.warning("on_rules_enable_sensor_changed %s", self._selected_preset._rules._enable_sensor_state)
+        _LOGGER.warning("on_rules_enable_sensor_changed %s %s", new_state.state, self._selected_preset._rules._enable_sensor_state)
         await self._async_control_heating()
             
     async def _async_on_heater_temp_changed(self, event):

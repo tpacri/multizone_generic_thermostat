@@ -15,11 +15,16 @@ def callService(serviceName: string, action: string, service_data):
         log.error(e) 
 
 def stateget(name: string):
-    result=str(state.get(name))
-
-    #loginfo("stateget: " + name+"="+result)
-    return result
-
+    try:    
+        result=str(state.get(name))
+    
+        #loginfo("stateget: " + name+"="+result)
+        return result
+    except Exception as e:
+        log.error("Error in state.get(" + str(name) + ") " + str(e)) 
+    
+    return None
+    
 def loginfo(values: string):
     log.info(values)
     print(values)
@@ -39,6 +44,7 @@ m_fabian_min_temp_entity_id = dataget("fabian_min_temp_entity_id")#input_number.
 m_dining_min_temp_entity_id = dataget("dining_min_temp_entity_id")#input_number.min_dining_temperature
 m_smallbedroom_min_temp_entity_id = dataget("smallbedroom_min_temp_entity_id")#input_number.min_small_bedroom_temperature
 m_ioana_sleeps_in_her_room = dataget("input_boolean.ioana_sleeps_in_her_room")
+m_thermostat_away_mode = dataget("input_boolean.thermostat_away_mode")
 
 m_ioanas_smart_heater_entity_id = m_ioanas_smart_heater_entity_id if m_ioanas_smart_heater_entity_id is not None else "climate.zhimi_heater_mc2_54_48_e6_89_5f_4f"
 m_ioana_min_temp_entity_id = m_ioana_min_temp_entity_id if m_ioana_min_temp_entity_id is not None else "input_number.min_ioanas_bedroom_temperature"
@@ -46,6 +52,8 @@ m_fabian_min_temp_entity_id = m_fabian_min_temp_entity_id if m_fabian_min_temp_e
 m_dining_min_temp_entity_id = m_dining_min_temp_entity_id if m_dining_min_temp_entity_id is not None else "input_number.min_dining_temperature"
 m_smallbedroom_min_temp_entity_id = m_smallbedroom_min_temp_entity_id if m_smallbedroom_min_temp_entity_id is not None else "input_number.min_small_bedroom_temperature"
 m_ioana_sleeps_in_her_room = m_ioana_sleeps_in_her_room if m_ioana_sleeps_in_her_room is not None else "input_boolean.ioana_sleeps_in_her_room"
+m_thermostat_away_mode = m_thermostat_away_mode if m_thermostat_away_mode is not None else "input_boolean.thermostat_away_mode"
+
 
 alldays=[0, 1, 2, 3, 4, 5, 6, 7]
 weekdays=[0, 1, 2, 3, 4, 5]
@@ -154,44 +162,77 @@ def BuildRooms():
     rooms.clear()
     #log.error("buildrooms")
     loginfo("####BuildRooms")
-    Ioana = Room("Ioana")
-    if (stateget(m_ioana_sleeps_in_her_room)=="on"):
-        loginfo("####BuildRooms - Ioana ON")
-        Ioana.On(weekdays, 7, 0, [TurnOnSmartHeater(m_ioanas_smart_heater_entity_id, 24), SetTemperature(m_ioana_min_temp_entity_id, 21.0)])
-        Ioana.On(weekdays, 7, 30, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 21.0)])
-        Ioana.On(alldays, 15, 00, [SetTemperature(m_ioana_min_temp_entity_id, 21.0)])
-        Ioana.On(alldays, 22, 00, [TurnOnSmartHeater(m_ioanas_smart_heater_entity_id, 19), SetTemperature(m_ioana_min_temp_entity_id, 21.0)])
-    else:
-        loginfo("####BuildRooms - Ioana OFF")
-        Ioana.On(alldays, 11, 45, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 17.0)])
     
-    Fabian = Room("Fabian")
-    Fabian.On(alldays, 11, 45, [SetTemperature(m_fabian_min_temp_entity_id, 17.0)])
-    Fabian.On(alldays, 22, 00, [SetTemperature(m_fabian_min_temp_entity_id, 20.0)])
-    
-    Dining = Room("Dining")
-    Dining.On(weekdays, 7, 00, [SetTemperature(m_dining_min_temp_entity_id, 20.0)])
-    Dining.On(weekdays, 11, 30, [SetTemperature(m_dining_min_temp_entity_id, 20.0)])
-    #Dining.On(weekdays, 9, 30, [SetTemperature(m_dining_min_temp_entity_id, 19.0)])
-    #Dining.On(weekdays, 15, 00, [SetTemperature(m_dining_min_temp_entity_id, 20.0)])
-    Dining.On(alldays, 22, 00, [SetTemperature(m_dining_min_temp_entity_id, 16.0)])
-    
-    SmallBedroom = Room("SmallBedroom")
-    SmallBedroom.On(alldays, 8, 00, [SetTemperature(m_smallbedroom_min_temp_entity_id, 16.0)])
-    SmallBedroom.On(alldays, 23, 45, [SetTemperature(m_smallbedroom_min_temp_entity_id, 16.0)])
-    
-    
-    rooms.append(Ioana)
-    rooms.append(Fabian)
-    rooms.append(Dining)
-    rooms.append(SmallBedroom)
+    if (stateget(m_thermostat_away_mode)=="on"):
 
+        Ioana = Room("Ioana")
+        Ioana.On(alldays, 8, 00, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 16.0)])
+        
+        Fabian = Room("Fabian")
+        Fabian.On(alldays, 8, 00, [SetTemperature(m_fabian_min_temp_entity_id, 18.0)])
+
+        Dining = Room("Dining")
+        Dining.On(alldays, 8, 00, [SetTemperature(m_dining_min_temp_entity_id, 18.0)])
+        
+        SmallBedroom = Room("SmallBedroom")
+        SmallBedroom.On(alldays, 8, 00, [SetTemperature(m_smallbedroom_min_temp_entity_id, 16.0)])
+
+        
+        rooms.append(Ioana)
+        rooms.append(Fabian)
+        rooms.append(Dining)
+        rooms.append(SmallBedroom)        
+
+    else:
+        Ioana = Room("Ioana")
+        if (stateget(m_ioana_sleeps_in_her_room)=="on"):
+            loginfo("####BuildRooms - Ioana ON")
+            #Ioana.On(weekdays, 6, 45, [TurnOnSmartHeater(m_ioanas_smart_heater_entity_id, 21), SetTemperature(m_ioana_min_temp_entity_id, 21.0)])
+            #Ioana.On(weekdays, 7, 20, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 19.0)])
+            Ioana.On(alldays, 9, 00, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 20.5)])
+            Ioana.On(alldays, 15, 00, [SetTemperature(m_ioana_min_temp_entity_id, 20.0)])
+            Ioana.On(alldays, 22, 00, [TurnOnSmartHeater(m_ioanas_smart_heater_entity_id, 19), SetTemperature(m_ioana_min_temp_entity_id, 20.5)])
+        else:
+            loginfo("####BuildRooms - Ioana OFF")
+            Ioana.On(alldays, 11, 45, [TurnOffSmartHeater(m_ioanas_smart_heater_entity_id), SetTemperature(m_ioana_min_temp_entity_id, 16.0)])
+        
+        Fabian = Room("Fabian")
+        Fabian.On(weekdays, 6, 45, [SetTemperature(m_fabian_min_temp_entity_id, 22.5)])
+        
+        if (stateget(m_ioana_sleeps_in_her_room)=="on"):
+            Fabian.On(weekdays, 7, 40, [SetTemperature(m_fabian_min_temp_entity_id, 17.0)])
+        else:
+            Fabian.On(weekdays, 7, 40, [SetTemperature(m_fabian_min_temp_entity_id, 21.5)])
+        Fabian.On(weekdays, 13, 30, [SetTemperature(m_fabian_min_temp_entity_id, 21.5)])
+        #Fabian.On([0, 4], 17, 00, [SetTemperature(m_fabian_min_temp_entity_id, 20.5)])
+        #Fabian.On(alldays, 17, 30, [SetTemperature(m_fabian_min_temp_entity_id, 20.5)])
+        Fabian.On(alldays, 22, 00, [SetTemperature(m_fabian_min_temp_entity_id, 21.0)])
+        
+        Dining = Room("Dining")
+        Dining.On(weekdays, 7, 00, [SetTemperature(m_dining_min_temp_entity_id, 21.0)])
+        Dining.On(weekdays, 7, 50, [SetTemperature(m_dining_min_temp_entity_id, 19.5)])
+        Dining.On(weekdays, 9, 30, [SetTemperature(m_dining_min_temp_entity_id, 21.0)])
+        Dining.On(weekdays, 11, 40, [SetTemperature(m_dining_min_temp_entity_id, 20.0)])
+        Dining.On(weekdays, 13, 30, [SetTemperature(m_dining_min_temp_entity_id, 21.0)])
+        Dining.On(alldays, 22, 00, [SetTemperature(m_dining_min_temp_entity_id, 16.0)])
+        
+        SmallBedroom = Room("SmallBedroom")
+        SmallBedroom.On(alldays, 8, 00, [SetTemperature(m_smallbedroom_min_temp_entity_id, 16.0)])
+        SmallBedroom.On(alldays, 22, 00, [SetTemperature(m_smallbedroom_min_temp_entity_id, 19.5)])
+        
+        
+        rooms.append(Ioana)
+        rooms.append(Fabian)
+        rooms.append(Dining)
+        rooms.append(SmallBedroom)
+        
 BuildRooms()
 
 @service
 @time_trigger
-@time_trigger("once(07:00:00)", "once(07:30:00)", "once(08:00:00)", "once(09:30:00)", "once(10:00:00)", "once(11:45:00)", "once(15:00:00)", "once(22:00:00)", "once(23:45:00)")
+@time_trigger("once(06:45:00)", "once(07:00:00)", "once(07:20:00)", "once(07:30:00)", "once(07:40:00)", "once(07:50:00)", "once(08:00:00)", "once(09:30:00)", "once(10:00:00)", "once(11:40:00)", "once(13:30:00)", "once(15:00:00)", "once(22:00:00)", "once(23:45:00)")
 @state_trigger("input_boolean.ioana_sleeps_in_her_room")
+@state_trigger("input_boolean.thermostat_away_mode")
 def thermostat_update():
     #log.error("pyscript thermostat started")
     BuildRooms()
