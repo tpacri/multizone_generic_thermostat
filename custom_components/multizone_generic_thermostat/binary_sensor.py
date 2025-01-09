@@ -6,7 +6,7 @@ import voluptuous as vol
 from datetime import timedelta
 from datetime import datetime
 
-from homeassistant.components.binary_sensor import PLATFORM_SCHEMA, ENTITY_ID_FORMAT, DEVICE_CLASS_OPENING
+from homeassistant.components.binary_sensor import PLATFORM_SCHEMA, ENTITY_ID_FORMAT, BinarySensorDeviceClass
 from homeassistant.helpers.entity import async_generate_entity_id
 
 from homeassistant.const import (
@@ -64,7 +64,7 @@ class IsWindowOpenSensor(BinarySensorEntity):
     @property
     def device_class(self):
         """Return device_class."""
-        return DEVICE_CLASS_OPENING
+        return BinarySensorDeviceClass.OPENING
 
     @property
     def icon(self):
