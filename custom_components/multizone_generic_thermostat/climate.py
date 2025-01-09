@@ -13,17 +13,11 @@ from datetime import datetime
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
 from homeassistant.components.climate.const import (
     ATTR_PRESET_MODE,
-    CURRENT_HVAC_COOL,
-    CURRENT_HVAC_HEAT,
-    CURRENT_HVAC_IDLE,
-    CURRENT_HVAC_OFF,
-    HVAC_MODE_COOL,
-    HVAC_MODE_HEAT,
-    HVAC_MODE_OFF,
+    HVACMode,
+    HVACAction,
+    ClimateEntityFeature,
     PRESET_AWAY,
-    PRESET_NONE,
-    SUPPORT_PRESET_MODE,
-    SUPPORT_TARGET_TEMPERATURE,
+    PRESET_NONE
 )
 
 from homeassistant.const import (
@@ -103,7 +97,7 @@ CONF_ON_DURATION_RULE = "on_duration_rule"
 CONF_MAX_ON_DURATION = "max_on_duration"
 CONF_MIN_OFF_DURATION = "min_off_duration"
 
-SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE
+SUPPORT_FLAGS = ClimateEntityFeature.TARGET_TEMPERATURE
 
 OPEN_WINDIW_SCHEMA = vol.Schema(
         {
@@ -188,7 +182,7 @@ PLATFORM_SCHEMA = vol.All(
         vol.Optional(CONF_TARGET_TEMP): vol.Coerce(float),
         vol.Optional(CONF_KEEP_ALIVE): cv.positive_time_period,
         vol.Optional(CONF_INITIAL_HVAC_MODE): vol.In(
-            [HVAC_MODE_COOL, HVAC_MODE_HEAT, HVAC_MODE_OFF]
+            [HVACMode.COOL, HVACMode.HEAT, HVACMode.OFF]
         ),
         vol.Optional(CONF_AWAY_TEMP): vol.Coerce(float),
         vol.Optional(CONF_PRECISION): vol.In(
@@ -221,7 +215,7 @@ class Rules():
         self._enable_sensor_state = True if enable_sensor is None else False
         self._max_heater_temp_rule = max_heater_temp_rule
         self._max_on_duration_rule = max_on_duration_rule
-        _LOGGER.warning("Rules %s", self._enable_sensor)
+        _LOGGER.info("Rules %s", self._enable_sensor)
         
         
 class MaxHeaterTempRuleDef():
@@ -672,9 +666,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             z._saved_target_temp = z._target_temp or away_temp
         self._temp_precision = precision
         if self.ac_mode:
-            self._hvac_list = [HVAC_MODE_COOL, HVAC_MODE_OFF]
+            self._hvac_list = [HVACMode.COOL, HVACMode.OFF]
         else:
-            self._hvac_list = [HVAC_MODE_HEAT, HVAC_MODE_OFF]
+            self._hvac_list = [HVACMode.HEAT, HVACMode.OFF]
         self._active = False
         self._cur_temp = None
         self._temp_lock = asyncio.Lock()
@@ -684,7 +678,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         self._unique_id = unique_id
         self._support_flags = SUPPORT_FLAGS
         if away_temp:
-            self._support_flags = SUPPORT_FLAGS | SUPPORT_PRESET_MODE
+            self._support_flags = SUPPORT_FLAGS | ClimateEntityFeature.PRESET_MODE
         self._away_temp = away_temp
         self._is_away = False
         self._isWindowOpenBinarySensor = IsWindowOpenSensor(hass, name)
@@ -714,7 +708,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             )
 
         if self._selected_preset._rules and self._selected_preset._rules._enable_sensor:
-            _LOGGER.warning("subscribe to rules enable sensor %s", self._selected_preset._rules._enable_sensor)
+            _LOGGER.info("subscribe to rules enable sensor %s", self._selected_preset._rules._enable_sensor)
             rules_enable_sensor_state = self.hass.states.get(self._selected_preset._rules._enable_sensor)
             await self._handle_rules_enable_sensor_changed(rules_enable_sensor_state)
             self.async_on_remove(
@@ -819,7 +813,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
         # Set default state to off
         if not self._hvac_mode:
-            self._hvac_mode = HVAC_MODE_OFF
+            self._hvac_mode = HVACMode.OFF
 
     @property
     def should_poll(self):
@@ -886,13 +880,13 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
         Need to be one of CURRENT_HVAC_*.
         """
-        if self._hvac_mode == HVAC_MODE_OFF:
-            return CURRENT_HVAC_OFF
+        if self._hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
         if not self._is_device_active:
-            return CURRENT_HVAC_IDLE
+            return HVACAction.IDLE
         if self.ac_mode:
-            return CURRENT_HVAC_COOL
-        return CURRENT_HVAC_HEAT
+            return HVACAction.COOL
+        return HVACAction.HEAT
 
     @property
     def target_temperature(self):
@@ -920,14 +914,14 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set hvac mode."""
-        if hvac_mode == HVAC_MODE_HEAT:
-            self._hvac_mode = HVAC_MODE_HEAT
+        if hvac_mode == HVACMode.HEAT:
+            self._hvac_mode = HVACMode.HEAT
             await self._async_control_heating(force=True)
-        elif hvac_mode == HVAC_MODE_COOL:
-            self._hvac_mode = HVAC_MODE_COOL
+        elif hvac_mode == HVACMode.COOL:
+            self._hvac_mode = HVACMode.COOL
             await self._async_control_heating(force=True)
-        elif hvac_mode == HVAC_MODE_OFF:
-            self._hvac_mode = HVAC_MODE_OFF
+        elif hvac_mode == HVACMode.OFF:
+            self._hvac_mode = HVACMode.OFF
             if self._is_device_active:
                 await self._async_heater_turn_off()
         else:
@@ -967,13 +961,13 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         return super().max_temp
 
     async def _async_on_rules_enable_sensor_changed(self, event):
-        _LOGGER.warning("_async_on_rules_enable_sensor_changed")
+        _LOGGER.info("_async_on_rules_enable_sensor_changed")
         new_state = event.data.get("new_state")
         await self._handle_rules_enable_sensor_changed(new_state)
         
     async def _handle_rules_enable_sensor_changed(self, new_state):
         self._selected_preset._rules._enable_sensor_state = new_state.state == STATE_ON
-        _LOGGER.warning("on_rules_enable_sensor_changed %s %s", new_state.state, self._selected_preset._rules._enable_sensor_state)
+        _LOGGER.info("on_rules_enable_sensor_changed %s %s", new_state.state, self._selected_preset._rules._enable_sensor_state)
         await self._async_control_heating()
             
     async def _async_on_heater_temp_changed(self, event):
@@ -1086,7 +1080,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     self._selected_zone.get_cur_temp(),
                 )
 
-            if not self._active or self._hvac_mode == HVAC_MODE_OFF:
+            if not self._active or self._hvac_mode == HVACMode.OFF:
                 _LOGGER.info("_async_control_heating exit - nota active")
                 return
 
@@ -1101,7 +1095,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     if self._is_device_active:
                         current_state = STATE_ON
                     else:
-                        current_state = HVAC_MODE_OFF
+                        current_state = HVACMode.OFF
                     long_enough = condition.state(
                         self.hass,
                         self.heater_entity_id,
