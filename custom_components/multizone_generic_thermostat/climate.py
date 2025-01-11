@@ -872,6 +872,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def hvac_mode(self):
         """Return current operation."""
+        #_LOGGER.warning("hvac_mode %s", self._hvac_mode)
         return self._hvac_mode
 
     @property
@@ -881,12 +882,16 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         Need to be one of CURRENT_HVAC_*.
         """
         if self._hvac_mode == HVACMode.OFF:
+            #_LOGGER.warning("hvac_action HVACAction.OFF")
             return HVACAction.OFF
         if not self._is_device_active:
+            #_LOGGER.warning("hvac_action HVACAction.IDLE")
             return HVACAction.IDLE
         if self.ac_mode:
-            return HVACAction.COOL
-        return HVACAction.HEAT
+            #_LOGGER.warning("hvac_action HVACAction.COOL")
+            return HVACAction.COOLING
+        #_LOGGER.warning("hvac_action HVACAction.HEATING")
+        return HVACAction.HEATING
 
     @property
     def target_temperature(self):
@@ -897,6 +902,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def hvac_modes(self):
         """List of available operation modes."""
+        #_LOGGER.warning("hvac_modes %s", ", ".join(self._hvac_list))
         return self._hvac_list
 
     @property
@@ -914,6 +920,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set hvac mode."""
+        #_LOGGER.warning("async_set_hvac_mode %s", hvac_mode)
         if hvac_mode == HVACMode.HEAT:
             self._hvac_mode = HVACMode.HEAT
             await self._async_control_heating(force=True)
