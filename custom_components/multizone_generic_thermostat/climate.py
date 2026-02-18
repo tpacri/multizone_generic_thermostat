@@ -60,12 +60,13 @@ DEFAULT_NAME = "Multizone Generic Thermostat"
 CONF_HEATER = "heater"
 ZONES = "zones"
 PRESETS = "presets"
-CONF_SENSOR = "target_sensor"
-CONF_TEMP_SENSORS = "target_sensors"
+CONF_SENSOR = "current_temp_sensor"
+CONF_TEMP_SENSORS = "current_temp_sensors"
 CONF_MIN_TEMP = "min_temp"
 CONF_MAX_TEMP = "max_temp"
 CONF_TARGET_TEMP = "target_temp"
 CONF_TARGET_TEMP_SENSOR = "target_temp_sensor"
+CONF_TARGET_TEMP_SENSOR_ATTRIBUTE = "target_temp_sensor_attribute"
 CONF_AC_MODE = "ac_mode"
 CONF_MIN_DUR = "min_cycle_duration"
 CONF_COLD_TOLERANCE = "cold_tolerance"
@@ -132,6 +133,7 @@ ZONE_SCHEMA = vol.All(
             vol.Optional(CONF_TEMP_SENSORS, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
             vol.Optional(CONF_TARGET_TEMP): vol.Coerce(float),
             vol.Optional(CONF_TARGET_TEMP_SENSOR): cv.entity_id,
+            vol.Optional(CONF_TARGET_TEMP_SENSOR_ATTRIBUTE): cv.string,
             vol.Optional(CONF_OPEN_WINDOW): vol.Schema(OPEN_WINDIW_SCHEMA)
         }
     ),
@@ -180,6 +182,8 @@ PLATFORM_SCHEMA = vol.All(
         vol.Optional(CONF_COLD_TOLERANCE, default=DEFAULT_TOLERANCE): vol.Coerce(float),
         vol.Optional(CONF_HOT_TOLERANCE, default=DEFAULT_TOLERANCE): vol.Coerce(float),
         vol.Optional(CONF_TARGET_TEMP): vol.Coerce(float),
+        vol.Optional(CONF_TARGET_TEMP_SENSOR): cv.entity_id,
+        vol.Optional(CONF_TARGET_TEMP_SENSOR_ATTRIBUTE): cv.string,
         vol.Optional(CONF_KEEP_ALIVE): cv.positive_time_period,
         vol.Optional(CONF_INITIAL_HVAC_MODE): vol.In(
             [HVACMode.COOL, HVACMode.HEAT, HVACMode.OFF]
@@ -193,7 +197,9 @@ PLATFORM_SCHEMA = vol.All(
         vol.Optional(CONF_RULES): vol.Schema(RULES_SCHEMA)
     },
 #    cv.has_at_most_one_key(CONF_SENSOR, CONF_TEMP_SENSORS)
-    ))
+    ),
+    cv.has_at_most_one_key(CONF_TARGET_TEMP, CONF_TARGET_TEMP_SENSOR)
+    )
 
 
 def is_temp_valid(temp)->bool:
@@ -433,12 +439,19 @@ class TempAggregator():
         return None
 
 class ZoneDef():
-    def __init__(self, friendly_name, sensor_entity_id, sensors_entity_id, target_entity_id, target_temp, name, openWindow):
+    def __init__(self, hass, friendly_name, sensor_entity_id, sensors_entity_id, target_entity_id, target_entity_id_attribute, target_temp, name, openWindow):
+        self._hass = hass
         self._friendly_name = friendly_name or name
         self._sensors_entity_id = [sensor_entity_id] if sensor_entity_id is not None else sensors_entity_id
-        self._target_entity_id = target_entity_id    
+        
+        # Parse target_entity_id to extract entity_id and attribute if present
+        self._target_entity_id = target_entity_id
+        self._target_entity_id_attribute = target_entity_id_attribute
+        
         self._name = name 
         self._target_temp = target_temp
+        _LOGGER.debug("zone target temp updated from ctor: %s", self._target_temp)
+
         self._openWindow = openWindow
         if (self._openWindow):
             self._openWindow._zoneName = name
@@ -449,6 +462,17 @@ class ZoneDef():
 
     def has_temp_sensor_defined(self):
         return self._sensors_entity_id is not None
+    
+    def get_target_temperature(self):
+        state = self._hass.states.get(self._target_entity_id)
+        if state is None:
+            return None
+        
+        # If an attribute is specified, extract it from the state object
+        if self._target_entity_id_attribute:
+            return state.attributes.get(self._target_entity_id_attribute)
+        
+        return state.state
         
     def get_sensors_entity_id_names(self):
         return (' '.join(self._sensors_entity_id)) if self._sensors_entity_id is not None else 'None'
@@ -466,6 +490,18 @@ class ZoneDef():
         self._cur_temp_per_sensor.set_cur_temp(sender_sensor, cur_temp)
         if self._openWindow is not None:
             self._openWindow.add_temp(sender_sensor, self.get_cur_temp())
+
+    def update_target_temp_from_state(self, new_target_temp_state):
+        if self._target_entity_id_attribute:
+            self._target_temp = new_target_temp_state.attributes.get(self._target_entity_id_attribute)
+            _LOGGER.debug("zone target temp updated from attribute %s: %s", self._target_entity_id_attribute, self._target_temp)
+        else:
+            self._target_temp = new_target_temp_state.state
+            _LOGGER.debug("zone target temp updated from state: %s", self._target_temp)
+
+    def update_target_temp_from_val(self, new_target_temp_val):
+        self._target_temp = new_target_temp_val
+        _LOGGER.debug("zone target temp updated from value: %s", self._target_temp)
 
     def is_zone_with_open_window(self) -> bool:
         if self._openWindow is None:
@@ -524,15 +560,16 @@ def parse_max_on_duration_rule(config):
     
     return MaxOnDurationRuleDef(max_on_duration, min_off_duration)
     
-def parse_zones_dict(explicit_zones, default_openwindow):
+def parse_zones_dict(hass, explicit_zones, default_openwindow):
     zones = []
     try:
         if explicit_zones:
             for key, z in explicit_zones.items():
-                zones.append(ZoneDef(z[ATTR_FRIENDLY_NAME] if (ATTR_FRIENDLY_NAME in z) else None, 
+                zones.append(ZoneDef(hass, z[ATTR_FRIENDLY_NAME] if (ATTR_FRIENDLY_NAME in z) else None, 
                     z[CONF_SENSOR] if (CONF_SENSOR in z) else None, 
                     z[CONF_TEMP_SENSORS] if (CONF_TEMP_SENSORS in z) else None, 
                     z[CONF_TARGET_TEMP_SENSOR] if (CONF_TARGET_TEMP_SENSOR in z) else None, 
+                    z[CONF_TARGET_TEMP_SENSOR_ATTRIBUTE] if (CONF_TARGET_TEMP_SENSOR_ATTRIBUTE in z) else None, 
                     z[CONF_TARGET_TEMP] if (CONF_TARGET_TEMP in z) else None, 
                     key,
                     parse_openwindow(z[CONF_OPEN_WINDOW]) if (CONF_OPEN_WINDOW in z) else deepcopy(default_openwindow)))
@@ -558,6 +595,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     max_temp = config.get(CONF_MAX_TEMP)
     target_temp0 = config.get(CONF_TARGET_TEMP)
     target_temp_sensor0 = config.get(CONF_TARGET_TEMP_SENSOR)
+    target_temp_sensor_attribute0 = config.get(CONF_TARGET_TEMP_SENSOR_ATTRIBUTE)
     ac_mode = config.get(CONF_AC_MODE)
     min_cycle_duration = config.get(CONF_MIN_DUR)
     cold_tolerance = config.get(CONF_COLD_TOLERANCE)
@@ -571,9 +609,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     
     default_openwindow= parse_openwindow(config[CONF_OPEN_WINDOW]) if (CONF_OPEN_WINDOW in config) else None
     default_rules=parse_rules(config[CONF_RULES]) if (CONF_RULES in config) else None
-    global_zone = list(filter(lambda z: (z.has_temp_sensor_defined()) and (not z._target_entity_id is None), [ZoneDef("Global", sensor_entity_id0, sensors_entity_id0, target_temp_sensor0, target_temp0, "GlobalZone", default_openwindow)]))
+    global_zone = list(filter(lambda z: (z.has_temp_sensor_defined()) and (not z._target_entity_id is None), [ZoneDef(hass, "Global", sensor_entity_id0, sensors_entity_id0, target_temp_sensor0, target_temp_sensor_attribute0, target_temp0, "GlobalZone", default_openwindow)]))
 
-    zones = global_zone + parse_zones_dict(explicit_zones, default_openwindow)
+    zones = global_zone + parse_zones_dict(hass, explicit_zones, default_openwindow)
 
     presets = list(filter(lambda p: len(p._zones) > 0, [PresetDef(PRESET_NONE, zones, PRESET_NONE, False, default_rules)]))
 
@@ -581,7 +619,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         if explicit_presets:
             for key, p in explicit_presets.items():
                 presets.append(PresetDef(p[ATTR_FRIENDLY_NAME] if (ATTR_FRIENDLY_NAME in p) else None, \
-                    parse_zones_dict(p[ZONES], default_openwindow), \
+                    parse_zones_dict(hass, p[ZONES], default_openwindow), \
                     key, \
                     p[CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME] if (CONF_REPORT_ZONE_NAME_INSTEAD_OF_PRESET_NAME in p) else None, \
                     parse_rules(p[CONF_RULES]) if (CONF_RULES in p) else default_rules))
@@ -624,6 +662,76 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         ]
     )
 
+class HeaterControlBase:
+    def __init__(self, hass, heater_entity_id):
+        self.hass = hass
+        self.heater_entity_id = heater_entity_id
+
+    def is_off_state(self, state):
+        """Check if the given state represents an off state."""
+        raise NotImplementedError
+
+    def is_heater_valid(self):
+        return (not self.hass.states.is_state(self.heater_entity_id, STATE_UNAVAILABLE)) and (not self.hass.states.is_state(self.heater_entity_id, STATE_UNKNOWN))
+
+class HeaterControlSwitch(HeaterControlBase):
+    OnState = STATE_ON
+    OffState = STATE_OFF
+
+    def __init__(self, hass, heater_entity_id):
+        super().__init__(hass, heater_entity_id)
+
+    def is_off_state(self, state):
+        """Check if the switch state is off."""
+        return state == STATE_OFF
+
+    def is_device_active(self):
+        """Check if the switch is on."""
+        return self.hass.states.is_state(self.heater_entity_id, STATE_ON)
+
+    async def async_turn_on(self, context):
+        """Turn on the switch heater."""
+        data = {ATTR_ENTITY_ID: self.heater_entity_id}
+        await self.hass.services.async_call(
+            HA_DOMAIN, SERVICE_TURN_ON, data, context=context
+        )
+
+    async def async_turn_off(self, context):
+        """Turn off the switch heater."""
+        data = {ATTR_ENTITY_ID: self.heater_entity_id}
+        await self.hass.services.async_call(
+            HA_DOMAIN, SERVICE_TURN_OFF, data, context=context
+        )
+
+class HeaterControlClimate(HeaterControlBase):
+    OnState = HVACMode.HEAT
+    OffState = HVACMode.OFF
+
+    def __init__(self, hass, heater_entity_id):
+        super().__init__(hass, heater_entity_id)
+
+    def is_off_state(self, state):
+        """Check if the climate state is off mode."""
+        return state == HVACMode.OFF
+
+    def is_device_active(self):
+        """Check if the climate entity is not in off mode."""
+        return not self.hass.states.is_state(self.heater_entity_id, HVACMode.OFF)
+
+    async def async_turn_on(self, context):
+        """Turn on the climate heater to HEAT mode."""
+        data = {ATTR_ENTITY_ID: self.heater_entity_id, "hvac_mode": HVACMode.HEAT}
+        await self.hass.services.async_call(
+            "climate", "set_hvac_mode", data, context=context
+        )
+
+    async def async_turn_off(self, context):
+        """Turn off the climate heater to OFF mode."""
+        data = {ATTR_ENTITY_ID: self.heater_entity_id, "hvac_mode": HVACMode.OFF}
+        await self.hass.services.async_call(
+            "climate", "set_hvac_mode", data, context=context
+        )
+
 class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     """Representation of a Multizone Generic Thermostat device."""
 
@@ -649,8 +757,8 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Initialize the thermostat."""
         _LOGGER.info("__init__. ")
 
+        self._heater_control = self._get_heater_control(hass, heater_entity_id)
         self._name = name
-        self.heater_entity_id = heater_entity_id
         self._presets = presets
         self._selected_preset = self._presets[0]
         self._selected_zone = self._selected_preset._zones[0]
@@ -683,6 +791,20 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         self._is_away = False
         self._isWindowOpenBinarySensor = IsWindowOpenSensor(hass, name)
 
+    def _get_heater_control(self, hass, heater_entity_id):
+        """Get the appropriate heater control based on entity domain.
+        
+        Args:
+            hass: Home Assistant instance
+            heater_entity_id: The entity ID of the heater (e.g., 'climate.living_room' or 'switch.heater')
+            
+        Returns:
+            HeaterControlClimate if entity is a climate entity, HeaterControlSwitch otherwise
+        """
+        if heater_entity_id.startswith('climate.'):
+            return HeaterControlClimate(hass, heater_entity_id)
+        else:
+            return HeaterControlSwitch(hass, heater_entity_id)
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
@@ -727,7 +849,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     
         self.async_on_remove(
             async_track_state_change_event(
-                self.hass, [self.heater_entity_id], self._async_switch_changed
+                self.hass, [self._heater_control.heater_entity_id], self._async_switch_changed
             )
         )
 
@@ -764,9 +886,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                 _LOGGER.debug("Initial set of target temps for preset %s", p._friendly_name)
                 for z in p._zones:
                     _LOGGER.debug("Initial set of target temps for preset %s Zone: %s | Target sensor id:%s", p._friendly_name, z._friendly_name, z._target_entity_id)
-                    target_value = self.hass.states.get(z._target_entity_id)
+                    target_value = z.get_target_temperature()
                     _LOGGER.debug("Initial set of target temp: %s Zone: %s Target:%s Target Value:%s", p._friendly_name, z._friendly_name, z._target_entity_id, target_value)
-                    self._async_update_target_temp(z, target_value)
+                    self._async_update_target_temp_from_val(z, target_value)
                       
             self.async_write_ha_state()  
             
@@ -804,9 +926,9 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             for z in self._selected_preset._zones:
                 if z._target_temp is None:
                     if self.ac_mode:
-                        z._target_temp = self.max_temp
+                        z.update_target_temp_from_val(self.max_temp)
                     else:
-                        z._target_temp = self.min_temp
+                        z.update_target_temp_from_val(self.min_temp)
                 _LOGGER.warning(
                     "No previously saved temperature, setting %s to %s", z._name, z._target_temp
                 )
@@ -945,7 +1067,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
         if temperature is None:
             return
-        (self._ongoing_zone or self._selected_zone)._target_temp = temperature
+        (self._ongoing_zone or self._selected_zone).update_target_temp_from_val(temperature)
         await self._async_control_heating(force=True)
         self.async_write_ha_state()
 
@@ -996,8 +1118,8 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         for p in self._presets:
             for z in p._zones:
                 if z._target_entity_id == sender:
-                    _LOGGER.debug("zone target value updated. %s: %s<%s", z._name, z._target_temp, new_state.state)
-                    self._async_update_target_temp(z, new_state)
+                    _LOGGER.debug("zone target state updated. %s: %s<%s", z._name, z._target_temp, new_state)
+                    self._async_update_target_temp_from_state(z, new_state)
         await self._async_control_heating()
         self.async_write_ha_state()
 
@@ -1031,17 +1153,26 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
 
         self.async_write_ha_state()
 
-        if new_state.state == STATE_OFF:
+        if self._heater_control.is_off_state(new_state.state):
             self._ongoing_zone = None
 
     @callback
-    def _async_update_target_temp(self, zone, state):
+    def _async_update_target_temp_from_state(self, zone, state):
         """Update thermostat with latest state from target sensor."""
         try:
-            zone._target_temp = state.state
+            zone.update_target_temp_from_state(state)
+            _LOGGER.debug("zone target state updated. %s: - set %s<%s", zone._name, zone._target_temp, zone.get_cur_temp())
+        except ValueError as ex:
+            _LOGGER.error("Unable to update target temp state %s from sensor: %s with state %s", zone._name, ex, state)
+
+    @callback
+    def _async_update_target_temp_from_val(self, zone, val):
+        """Update thermostat with latest state from target sensor."""
+        try:
+            zone.update_target_temp_from_val(val)
             _LOGGER.debug("zone target value updated. %s: - set %s<%s", zone._name, zone._target_temp, zone.get_cur_temp())
         except ValueError as ex:
-            _LOGGER.error("Unable to update target temp %s from sensor: %s", z._name, ex)
+            _LOGGER.error("Unable to update target temp %s from sensor: %s with value %s", zone._name, ex, val)
 
     @callback
     def _async_update_temp(self, zone, sender_sensor, state):
@@ -1100,12 +1231,12 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                 
                 if self.min_cycle_duration and self._is_heater_valid():
                     if self._is_device_active:
-                        current_state = STATE_ON
+                        current_state = self._heater_control.OnState
                     else:
-                        current_state = HVACMode.OFF
+                        current_state = self._heater_control.OffState
                     long_enough = condition.state(
                         self.hass,
-                        self.heater_entity_id,
+                        self._heater_control.heater_entity_id,
                         current_state,
                         self.min_cycle_duration,
                     )
@@ -1155,7 +1286,7 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
             
             if self._is_device_active:
                 if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
-                    _LOGGER.info("Turning off heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, target_temp_value, cur_temp_value)
+                    _LOGGER.info("Turning off heater %s %s (%s<%s)", self._selected_zone._name, self._heater_control.heater_entity_id, target_temp_value, cur_temp_value)
                     self._ongoing_zone = None
                     self.select_worst_zone()
                     new_too_cold = target_temp_value >= cur_temp_value + self._cold_tolerance
@@ -1168,21 +1299,21 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                     # The time argument is passed only in keep-alive case
                     _LOGGER.debug(
                         "Keep-alive - Turning on heater heater %s",
-                        self.heater_entity_id,
+                        self._heater_control.heater_entity_id,
                     )
 
                     self._ongoing_zone = self._selected_zone
                     await self._async_heater_turn_on()
             else:
                 if (self.ac_mode and too_hot) or (not self.ac_mode and too_cold):
-                    _LOGGER.info("Turning on heater %s %s (%s<%s)", self._selected_zone._name, self.heater_entity_id, target_temp_value, cur_temp_value)
+                    _LOGGER.info("Turning on heater %s %s (%s<%s)", self._selected_zone._name, self._heater_control.heater_entity_id, target_temp_value, cur_temp_value)
 
                     self._ongoing_zone = self._selected_zone
                     await self._async_heater_turn_on()
                 elif time is not None:
                     # The time argument is passed only in keep-alive case
                     _LOGGER.debug(
-                        "Keep-alive - Turning off heater %s", self.heater_entity_id
+                        "Keep-alive - Turning off heater %s", self._heater_control.heater_entity_id
                     )
                     self._ongoing_zone = None
                     await self._async_heater_turn_off()
@@ -1190,10 +1321,10 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
     @property
     def _is_device_active(self):
         """If the toggleable device is currently active."""
-        return self.hass.states.is_state(self.heater_entity_id, STATE_ON)
+        return self._heater_control.is_device_active()
 
     def _is_heater_valid(self):
-        return (not self.hass.states.is_state(self.heater_entity_id, STATE_UNAVAILABLE)) and (not self.hass.states.is_state(self.heater_entity_id, STATE_UNKNOWN))
+        return self._heater_control.is_heater_valid()
         
     @property
     def supported_features(self):
@@ -1204,26 +1335,20 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
         """Turn heater toggleable device on."""
         if self._selected_preset._rules and self._selected_preset._rules._max_on_duration_rule:
             self._selected_preset._rules._max_on_duration_rule.on_turned_on()
-                
-        data = {ATTR_ENTITY_ID: self.heater_entity_id}
-        await self.hass.services.async_call(
-            HA_DOMAIN, SERVICE_TURN_ON, data, context=self._context
-        )
+
+        await self._heater_control.async_turn_on(self._context)        
 
     async def _async_heater_turn_off(self):
         """Turn heater toggleable device off."""
         if self._selected_preset._rules and self._selected_preset._rules._max_on_duration_rule:
             self._selected_preset._rules._max_on_duration_rule.on_turned_off()
         
-        data = {ATTR_ENTITY_ID: self.heater_entity_id}
-        await self.hass.services.async_call(
-            HA_DOMAIN, SERVICE_TURN_OFF, data, context=self._context
-        )
+        await self._heater_control.async_turn_off(self._context)        
 
     async def async_set_preset_mode(self, preset_mode: str):
         """Set new preset mode."""
 
-        _LOGGER.info("async_set_preset_mode %s %s", self.heater_entity_id, preset_mode)
+        _LOGGER.info("async_set_preset_mode %s %s", self._heater_control.heater_entity_id, preset_mode)
 
         if preset_mode in self._presets:
             self._selected_preset = self._presets[preset_mode]
@@ -1234,13 +1359,13 @@ class MultizoneGenericThermostat(ClimateEntity, RestoreEntity):
                 self._is_away = True
                 for z in self._selected_preset._zones:
                     z._saved_target_temp = z._target_temp
-                    z._target_temp = self._away_temp
+                    z.update_target_temp_from_val(self._away_temp)
                 self._ongoing_zone = None
                 await self._async_control_heating(force=True)
             elif preset_mode == PRESET_NONE and self._is_away:
                 self._is_away = False
                 for z in self._selected_preset._zones:
-                    z._target_temp = z._saved_target_temp
+                    z.update_target_temp_from_val(z._saved_target_temp)
                 self._ongoing_zone = None
                 await self._async_control_heating(force=True)
 
