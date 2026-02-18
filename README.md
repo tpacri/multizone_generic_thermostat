@@ -137,6 +137,12 @@ input_number:
     step: 0.1  
     
 climate:
+  - platform: multizone_generic_thermostat
+    name: Ioana MiHeater Thermostat
+    heater: climate.zhimi_heater_mc2_54_48_e6_89_5f_4f 
+    current_temp_sensor: sensor.ioanas_bedroom_temperature
+    target_temp_sensor: climate.zhimi_heater_mc2_54_48_e6_89_5f_4f
+    target_temp_sensor_attribute: temperature
 
   - platform: multizone_generic_thermostat
     name: Thermostat
@@ -146,35 +152,50 @@ climate:
             report_zone_name_instead_preset_name: true
             zones:
                 dining:
-                    target_sensors:
+                    current_temp_sensors:
                         - sensor.dining_room_temperature2
                         - sensor.mi_dining_temperature
+                        #- sensor.thermostat_ambiental_temperature
                     target_temp_sensor: input_number.min_dining_temperature
                 fabians_bedroom:
                     friendly_name: Fabian's bedroom
-                    target_sensors: 
+                    current_temp_sensors: 
                         - sensor.fabians_bedroom_temperature
                         - sensor.mi_fabian_bedroom_temperature
                     target_temp_sensor: input_number.min_fabians_bedroom_temperature
                 small_bedroom:
                     friendly_name: small bedroom
-                    target_sensor: sensor.small_bedroom_temperature
+                    current_temp_sensors:
+                        - sensor.small_bedroom_temperature
+                        - sensor.mi_small_bedroom_temperature
                     target_temp_sensor: input_number.min_small_bedroom_temperature
                 ioanas_bedroom:
                     friendly_name: Ioana's bedroom
-                    target_sensor: sensor.ioanas_bedroom_temperature
+                    current_temp_sensor: sensor.ioanas_bedroom_temperature
                     target_temp_sensor: input_number.min_ioanas_bedroom_temperature
                     #open_window:
                     #    delta_temp: 4
                     #    delta_time: 100
                     #    zone_react_delay: 00:10:00    
+            #rules:
+            #    enable_sensor: input_boolean.thermostat_rules
+            #    on_duration_rule:
+            #        max_on_duration: 00:25:00
+            #        min_off_duration: 00:10:00
+                    
+            #    max_heater_temp_rule:
+            #        heater_temp_sensors: 
+            #            - sensor.temperature_mysensor_7_0
+            #        max_temp: 55
+            #        tolerance: 10
     open_window:
-        delta_temp: 0.25
+        delta_temp: 0.5
+        #delta_temp: 0.25
         min_delta_time: 60
         delta_time: 180
         zone_react_delay: 00:10:00
-        ignored_target_sensors:
-            - sensor.thermostat_ambiental_temperature
+        #ignored_current_temp_sensors:
+        #    - sensor.thermostat_ambiental_temperature
     min_temp: 17
     max_temp: 25
     ac_mode: false
@@ -187,7 +208,8 @@ climate:
       minutes: 3
     initial_hvac_mode: "heat"
     away_temp: 22
-    precision: 0.1     
+    precision: 0.1          
+   
 ```	
 <!---->
 
